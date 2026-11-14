@@ -12,6 +12,10 @@ It is a fork of [SmartTube](https://github.com/yuliskov/SmartTube) by yuliskov, 
 
 ### Highlights
 
+- **Pinch-to-zoom & pan**: two-finger pinch to zoom video and drag to pan/reposition while zoomed in.
+- **Two-finger rotation & portrait fullscreen toggle**: rotate video smoothly between four fixed angles (`0° / 90° / 180° / 270°`) with two fingers, plus a dedicated portrait fullscreen button next to fullscreen.
+- **In-player resolution switcher**: dedicated quality/resolution button right next to the portrait fullscreen button for instant resolution switching.
+- **Two-column waterfall recommended feed**: mobile-first staggered 2-column recommended Home feed with smooth continuous pagination.
 - **Native phone & tablet UI**: portrait home with a navigation drawer, search with voice input, and settings with touch-friendly pickers and sliders.
 - **Modern, Classic or Tap to pause player**: phone-style controls by default, or SmartTube's original control rows. In landscape, swipe up/down to change volume (right side) or brightness (left side).
 - **Seek previews, SponsorBlock and chapters**: drag the seek bar to see a preview frame with the chapter name. Sponsor segments and chapter marks show on the bar, and the chapters also appear as a strip above the up-next list.

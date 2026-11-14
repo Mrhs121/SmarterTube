@@ -139,6 +139,22 @@
                 android:textSize="13sp" />
 
             <ImageButton
+                android:id="@+id/modern_quality"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_modern_icon_button"
+                android:contentDescription="@string/mobile_player_quality"
+                android:src="@drawable/ic_modern_quality" />
+
+            <ImageButton
+                android:id="@+id/modern_portrait_fullscreen"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_modern_icon_button"
+                android:contentDescription="@string/mobile_player_portrait_fullscreen"
+                android:src="@drawable/ic_modern_portrait_fullscreen" />
+
+            <ImageButton
                 android:id="@+id/modern_fullscreen"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
@@ -171,68 +187,79 @@
             android:paddingEnd="8dp"
             android:paddingBottom="8dp">
 
-            <ImageButton
-                android:id="@+id/modern_like"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_like"
-                android:src="@drawable/ic_shorts_like" />
-
-            <ImageButton
-                android:id="@+id/modern_dislike"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_dislike"
-                android:src="@drawable/ic_shorts_dislike" />
-
-            <ImageButton
-                android:id="@+id/modern_comments"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_comments"
-                android:src="@drawable/ic_shorts_comments" />
-
-            <ImageButton
-                android:id="@+id/modern_save"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_save"
-                android:src="@drawable/ic_modern_save" />
-
-            <ImageButton
-                android:id="@+id/modern_share"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_share"
-                android:src="@drawable/ic_modern_share" />
-
-            <ImageButton
-                android:id="@+id/modern_more"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_modern_icon_button"
-                android:contentDescription="@string/mobile_player_more"
-                android:src="@drawable/ic_modern_more" />
-
-            <Space
+            <HorizontalScrollView
                 android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageButton
+                        android:id="@+id/modern_like"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_like"
+                        android:src="@drawable/ic_shorts_like" />
+
+                    <ImageButton
+                        android:id="@+id/modern_dislike"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_dislike"
+                        android:src="@drawable/ic_shorts_dislike" />
+
+                    <ImageButton
+                        android:id="@+id/modern_comments"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_comments"
+                        android:src="@drawable/ic_shorts_comments" />
+
+                    <ImageButton
+                        android:id="@+id/modern_save"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_save"
+                        android:src="@drawable/ic_modern_save" />
+
+                    <ImageButton
+                        android:id="@+id/modern_share"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_share"
+                        android:src="@drawable/ic_modern_share" />
+
+                    <ImageButton
+                        android:id="@+id/modern_more"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_modern_icon_button"
+                        android:contentDescription="@string/mobile_player_more"
+                        android:src="@drawable/ic_modern_more" />
+                </LinearLayout>
+            </HorizontalScrollView>
 
             <TextView
                 android:id="@+id/modern_more_videos"
                 android:layout_width="wrap_content"
                 android:layout_height="40dp"
+                android:layout_marginStart="8dp"
                 android:background="@drawable/bg_modern_pill"
                 android:gravity="center"
                 android:paddingStart="16dp"

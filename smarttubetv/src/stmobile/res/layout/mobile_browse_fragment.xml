@@ -26,29 +26,37 @@
 
             <TextView
                 android:id="@+id/btn_menu"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
+                android:layout_width="48dp"
+                android:layout_height="52dp"
                 android:gravity="center"
                 android:text="☰"
                 android:textColor="@color/mobile_text_primary"
                 android:textSize="22sp"
                 android:background="?android:attr/selectableItemBackground" />
 
+            <ImageView
+                android:id="@+id/toolbar_logo"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_marginEnd="8dp"
+                android:src="@drawable/ic_brand_logo"
+                android:contentDescription="@null" />
+
             <TextView
                 android:id="@+id/toolbar_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="4dp"
                 android:singleLine="true"
                 android:textColor="@color/mobile_text_primary"
-                android:textSize="18sp" />
+                android:textSize="19sp"
+                android:textStyle="bold" />
 
             <ImageView
                 android:id="@+id/btn_search"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:padding="16dp"
+                android:layout_width="48dp"
+                android:layout_height="52dp"
+                android:padding="12dp"
                 android:scaleType="fitCenter"
                 android:src="@android:drawable/ic_menu_search"
                 android:tint="@color/mobile_text_primary"
@@ -62,15 +70,36 @@
             -->
             <ImageView
                 android:id="@+id/btn_account"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:padding="12dp"
+                android:layout_width="48dp"
+                android:layout_height="52dp"
+                android:layout_marginEnd="4dp"
+                android:padding="10dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/browse_title_account"
                 android:tint="@color/mobile_text_primary"
                 android:contentDescription="@string/mobile_account_hint"
                 android:background="?android:attr/selectableItemBackground" />
         </LinearLayout>
+
+        <!-- Category / section filter chips strip (like official YouTube Home). -->
+        <HorizontalScrollView
+            android:id="@+id/home_chips_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:background="@color/mobile_primary"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/home_chips"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="10dp" />
+        </HorizontalScrollView>
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -123,6 +152,151 @@
                     android:visibility="gone" />
             </LinearLayout>
         </FrameLayout>
+
+        <View
+            android:id="@+id/mobile_bottom_nav_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/mobile_divider" />
+
+        <!-- Bottom navigation bar matching official YouTube mobile tabs. -->
+        <LinearLayout
+            android:id="@+id/mobile_bottom_nav"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:background="@color/mobile_primary">
+
+            <LinearLayout
+                android:id="@+id/nav_home"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="?android:attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/nav_home_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_shorts_nav_home"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/nav_home_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:text="@string/header_home"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/nav_shorts"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="?android:attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/nav_shorts_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_shorts_nav_shorts"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/nav_shorts_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:text="@string/header_shorts"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/nav_subscriptions"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="?android:attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/nav_subscriptions_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_shorts_nav_subs"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/nav_subscriptions_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:text="@string/header_subscriptions"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/nav_playlists"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="?android:attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/nav_playlists_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_shorts_nav_playlists"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/nav_playlists_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:text="@string/header_playlists"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/nav_history"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="?android:attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/nav_history_icon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_shorts_nav_you"
+                    android:contentDescription="@null" />
+
+                <TextView
+                    android:id="@+id/nav_history_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:singleLine="true"
+                    android:text="@string/header_history"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Drawer menu: scrollable section list + pinned About footer at the bottom. -->

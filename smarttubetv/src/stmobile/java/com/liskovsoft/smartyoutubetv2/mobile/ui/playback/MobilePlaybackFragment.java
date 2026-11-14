@@ -3,6 +3,8 @@ package com.liskovsoft.smartyoutubetv2.mobile.ui.playback;
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Outline;
+import android.graphics.RectF;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Handler;
@@ -10,26 +12,38 @@ import android.support.v4.media.session.MediaSessionCompat;
 import android.text.TextUtils;
 import android.text.style.ClickableSpan;
 import android.view.GestureDetector;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.view.ViewTreeObserver;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
+import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import androidx.core.view.ViewCompat;
 
 import com.bumptech.glide.Glide;
+import com.google.android.exoplayer2.Player;
+import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.video.VideoListener;
 import com.liskovsoft.mediaserviceinterfaces.MediaItemService;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaItemMetadata;
@@ -47,6 +61,9 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerU
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.controller.ExoPlayerController;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.ExoPlayerInitializer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.mobile.notifications.MediaNotificationService;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
@@ -203,6 +220,8 @@ public class MobilePlaybackFragment extends PlaybackFragment {
     private ModernPlayerChrome mModernChrome;
     private View mSettingsBtn;
     private View mFullscreenBtn;
+    private View mPortraitFullscreenBtn;
+    private View mQualityBtn;
     private boolean mResumeAfterSettings;
     // Tap to pause: our own tap detector while the controls are hidden (single tap = play/pause,
     // double tap = seek), replacing upstream's tickle-on-touch-down there.
@@ -212,8 +231,14 @@ public class MobilePlaybackFragment extends PlaybackFragment {
     // Swipe gestures in the landscape player (#48): volume right, brightness left.
     private SwipeGestures mSwipe;
     private boolean mSwipeEnabled;
-    // Pinch to zoom in the landscape player (#85): fit <-> fill via the player's resize mode.
+    // Pinch to zoom, pan, and 90-degree rotation in fullscreen (#85).
     private PinchZoom mPinch;
+    private int mPendingRotationAngle;
+    private int mLastVideoWidth;
+    private int mLastVideoHeight;
+    private List<SeekBarSegment> mLastSeekBarSegments;
+    private RectF mPendingEnterBounds;
+    private RectF mPendingExpandBounds;
     // Set once a pinch changed the resize mode, so leaving the landscape player puts the saved one back.
     // Set while SwipeGestures replays a held touch through the normal path, so it isn't re-captured.
     private boolean mReplayingTouch;
@@ -270,6 +295,27 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         MobileSettingsActivity.start(requireActivity(), true);
     }
 
+    /** Applies a user-selected video format and persists it cleanly without restarting playback unnecessarily. */
+    void selectVideoFormat(FormatItem formatItem) {
+        if (formatItem == null) {
+            return;
+        }
+        setFormat(formatItem);
+        PlayerData playerData = PlayerData.instance(getContext());
+        if (formatItem.getType() == FormatItem.TYPE_VIDEO) {
+            if (!playerData.getFormat(FormatItem.TYPE_VIDEO).isPreset()) {
+                playerData.setFormat(formatItem);
+            } else {
+                playerData.setTempVideoFormat(formatItem);
+            }
+        } else {
+            playerData.setFormat(formatItem);
+        }
+        if (!containsMedia()) {
+            reloadPlayback();
+        }
+    }
+
     /** Classic has no gear sheet, so its portrait panel carries the Settings shortcut. */
     private void updateSettingsButton() {
         if (mSettingsBtn != null) {
@@ -277,6 +323,53 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         }
         if (mFullscreenBtn != null) {
             mFullscreenBtn.setVisibility(mStyle.isModern() ? View.GONE : View.VISIBLE);
+        }
+        if (mPortraitFullscreenBtn != null) {
+            mPortraitFullscreenBtn.setVisibility(mStyle.isModern() ? View.GONE : View.VISIBLE);
+        }
+        if (mQualityBtn != null) {
+            mQualityBtn.setVisibility(mStyle.isModern() ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    @Override
+    protected boolean shouldUseTextureView() {
+        return true;
+    }
+
+    @Override
+    protected void scaleIfNeeded() {
+        View root = getView();
+        View surfaceRoot = root != null ? root.findViewById(R.id.surface_root) : null;
+        if (!(surfaceRoot instanceof ViewGroup)
+                || surfaceRoot.getWidth() == 0 || surfaceRoot.getHeight() == 0) {
+            return;
+        }
+        ViewGroup group = (ViewGroup) surfaceRoot;
+        if (group.getChildCount() == 0 || !(group.getChildAt(0) instanceof TextureView)) {
+            return;
+        }
+        View textureView = group.getChildAt(0);
+        ViewGroup.LayoutParams rawParams = textureView.getLayoutParams();
+        if (!(rawParams instanceof FrameLayout.LayoutParams)) {
+            return;
+        }
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rawParams;
+        int w = surfaceRoot.getWidth();
+        int h = surfaceRoot.getHeight();
+        if (params.width != w || params.height != h || params.gravity != Gravity.CENTER) {
+            params.width = w;
+            params.height = h;
+            params.gravity = Gravity.CENTER;
+            textureView.setLayoutParams(params);
+        }
+    }
+
+    @Override
+    protected void setRotation(int angle) {
+        mPendingRotationAngle = angle;
+        if (mPinch != null) {
+            mPinch.setRotationAngle(angle);
         }
     }
 
@@ -321,7 +414,105 @@ public class MobilePlaybackFragment extends PlaybackFragment {
      * the real frame size is known a landscape "Short" is demoted to a regular video.
      */
     @Override
+    protected boolean adoptRunningEngine() {
+        MobileMiniPlayer mini = MobileMiniPlayer.getInstance();
+        MobileMiniPlayer.Session session = mini.consumeRestoreSession();
+        if (session == null) {
+            return false;
+        }
+        mPendingExpandBounds = mini.consumePendingExpandBounds();
+        attachAdoptedEngine(session.player, session.controller, session.initializer);
+        watchRestoredSurfaceAndCleanupMini(session.player);
+
+        mLastVideoWidth = session.videoWidth;
+        mLastVideoHeight = session.videoHeight;
+        if (session.videoWidth > 0 && session.videoHeight > 0) {
+            onVideoSizeChanged(session.videoWidth, session.videoHeight);
+        }
+        if (session.video != null) {
+            setVideo(session.video);
+        }
+        if (!session.suggestionGroups.isEmpty()) {
+            mSuggestionGroups.clear();
+            for (VideoGroup group : session.suggestionGroups) {
+                updateSuggestions(group);
+            }
+        }
+        if (session.seekBarSegments != null) {
+            setSeekBarSegments(session.seekBarSegments);
+        }
+        loadStoryboard();
+        return true;
+    }
+
+    private void watchRestoredSurfaceAndCleanupMini(SimpleExoPlayer player) {
+        if (player == null) {
+            MobileMiniPlayer.getInstance().completeExpandCleanup();
+            return;
+        }
+        View root = getView();
+        Runnable fallbackCleanup = () -> MobileMiniPlayer.getInstance().completeExpandCleanup();
+        VideoListener listener = new VideoListener() {
+            @Override
+            public void onRenderedFirstFrame() {
+                if (root != null) {
+                    root.removeCallbacks(fallbackCleanup);
+                } else {
+                    mChromeHandler.removeCallbacks(fallbackCleanup);
+                }
+                player.removeVideoListener(this);
+                MobileMiniPlayer.getInstance().completeExpandCleanup();
+            }
+        };
+        player.addVideoListener(listener);
+        // Fallback cleanup if already paused on expand; never seekTo() during normal surface handoff.
+        if (root != null) {
+            root.postDelayed(fallbackCleanup, 600);
+        } else {
+            mChromeHandler.postDelayed(fallbackCleanup, 600);
+        }
+    }
+
+    /** Detaches the live player engine into the bottom-right mini-player without interrupting playback. */
+    boolean handoffToMiniPlayer() {
+        SimpleExoPlayer player = getExoPlayer();
+        ExoPlayerController controller = getExoPlayerController();
+        ExoPlayerInitializer initializer = getExoPlayerInitializer();
+        Context ctx = getContext();
+        if (player == null || controller == null || initializer == null || ctx == null) {
+            return false;
+        }
+        Video video = controller.getVideo();
+        if (video == null) {
+            video = PlaybackPresenter.instance(ctx).getVideo();
+        }
+        int width = mLastVideoWidth;
+        int height = mLastVideoHeight;
+        if ((width <= 0 || height <= 0) && player.getVideoFormat() != null) {
+            width = player.getVideoFormat().width;
+            height = player.getVideoFormat().height;
+        }
+        RectF enterBounds = mPendingEnterBounds;
+        mPendingEnterBounds = null;
+        MobileMiniPlayer.Session session = new MobileMiniPlayer.Session(
+                player,
+                controller,
+                initializer,
+                video,
+                width,
+                height,
+                mSuggestionGroups,
+                mLastSeekBarSegments,
+                enterBounds);
+        detachEngineForHandoff();
+        MobileMiniPlayer.getInstance().start(ctx, session);
+        return true;
+    }
+
+    @Override
     protected void onVideoSizeChanged(int width, int height) {
+        mLastVideoWidth = width;
+        mLastVideoHeight = height;
         super.onVideoSizeChanged(width, height);
 
         Video video = PlaybackPresenter.instance(getContext()).getVideo();
@@ -369,6 +560,15 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         if (video != null && getView() != null) {
             super.setAspectRatio(video.isShorts ? PlayerData.ASPECT_RATIO_DEFAULT
                     : PlayerData.instance(getContext()).getAspectRatio());
+        }
+
+        if (video != null && !TextUtils.equals(mLastVideoId, video.videoId) && mPinch != null) {
+            mPinch.reset(false, true);
+            int savedRotation = PlayerData.instance(getContext()).getRotationAngle();
+            mPendingRotationAngle = savedRotation;
+            if (savedRotation != 0) {
+                mPinch.setRotationAngle(savedRotation);
+            }
         }
 
         if (initPanelViews()) {
@@ -862,14 +1062,15 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             return handleShortsTouchEvent(event);
         }
 
-        // Portrait strip (#62): in the phone-style (Modern / Tap to pause) players a swipe up on
-        // the video goes full-screen, like the YouTube app. Classic has the panel button instead.
-        if (mLayoutState == 1 && mStyle.isModern() && handleStripSwipeUp(event, playerView)) {
+        // Portrait strip (#62 + mini-player): swipe up goes full-screen in Modern style;
+        // swipe down in non-fullscreen shrinks into the bottom-right mini-player.
+        if (mLayoutState == 1 && !mReplayingTouch && handleStripVerticalSwipe(event, playerView)) {
             return true;
         }
 
-        // Pinch to zoom (#85): watches every touch in the landscape player; at the second finger the
-        // pinch takes the gesture over and whatever the first finger started is cancelled.
+        // Pinch to zoom, pan, and rotation (#85): watches every touch in the fullscreen player;
+        // at the second finger the pinch/rotate takes the gesture over and whatever the first
+        // finger started is cancelled. When zoomed in, a single-finger drag pans the picture.
         if (mPinch != null && !mReplayingTouch) {
             if (mPinch.isActive()) {
                 return mPinch.handle(event);
@@ -877,6 +1078,12 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             if (pinchCanWatch() && mPinch.watch(event)) {
                 cancelForPinch(event);
                 return true;
+            }
+            if (mPinch.isPanning()) {
+                return mPinch.handlePan(event, this::replayTouch);
+            }
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN && panCanStart(event, playerView)) {
+                return mPinch.startPan(event);
             }
         }
 
@@ -909,48 +1116,257 @@ public class MobilePlaybackFragment extends PlaybackFragment {
     private float mStripDownX;
     private float mStripDownY;
     private boolean mStripDownInVideo;
+    private boolean mStripSwipingDown;
 
     /**
-     * Watches touches on the 16:9 strip without consuming them (taps keep working); a clear
-     * upward swipe that started on the video enters full-screen (#62). Returns true only for the
-     * ACTION_UP that completes such a swipe.
+     * Watches touches on the non-fullscreen 16:9 strip:
+     * - Swipe UP (Modern styles) enters fullscreen.
+     * - Swipe DOWN interactively fades out below-video content, shrinks the video frame toward
+     *   the bottom-right mini-player target, and seamlessly hands off into {@link MobileMiniPlayer}.
      */
-    private boolean handleStripSwipeUp(MotionEvent event, View playerView) {
+    private boolean handleStripVerticalSwipe(MotionEvent event, View playerView) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 mStripDownX = event.getX();
                 mStripDownY = event.getY();
-                mStripDownInVideo = !isInPipMode() && event.getY() <= playerView.getBottom();
+                mStripSwipingDown = false;
+                mStripDownInVideo = !isInPipMode()
+                        && event.getY() <= playerView.getBottom()
+                        && !hitsStripSeekBar(event.getRawX(), event.getRawY(), playerView);
                 return false;
+
+            case MotionEvent.ACTION_MOVE: {
+                if (!mStripDownInVideo) {
+                    return false;
+                }
+                float dx = event.getX() - mStripDownX;
+                float dy = event.getY() - mStripDownY;
+                float density = getResources().getDisplayMetrics().density;
+                int slop = ViewConfiguration.get(requireContext()).getScaledTouchSlop() * 2;
+                if (!mStripSwipingDown && dy > slop && dy > 1.8f * Math.abs(dx)) {
+                    mStripSwipingDown = true;
+                    cancelStripDownstreamTouches(event);
+                }
+                if (mStripSwipingDown) {
+                    float maxDragPx = 180f * density;
+                    float progress = PlaybackNavigationRules.computeStripDragProgress(dy, maxDragPx);
+                    applyStripDragVisuals(playerView, progress);
+                    return true;
+                }
+                return false;
+            }
+
             case MotionEvent.ACTION_UP: {
                 boolean candidate = mStripDownInVideo;
+                boolean swipingDown = mStripSwipingDown;
                 mStripDownInVideo = false;
-                if (!candidate) return false;
+                mStripSwipingDown = false;
+                if (!candidate) {
+                    return false;
+                }
                 float dy = event.getY() - mStripDownY;
                 float dx = event.getX() - mStripDownX;
                 float minDy = 48 * getResources().getDisplayMetrics().density;
-                if (-dy > minDy && -dy > 2 * Math.abs(dx)
+                int direction = PlaybackNavigationRules.classifyStripSwipe(dx, dy, minDy);
+                if (direction == PlaybackNavigationRules.STRIP_SWIPE_DOWN
+                        && getActivity() instanceof MobilePlaybackActivity) {
+                    mPendingEnterBounds = captureViewScreenBounds(playerView);
+                    ((MobilePlaybackActivity) getActivity()).minimizeToMiniPlayer();
+                    return true;
+                }
+                if (swipingDown || playerView.getTranslationY() != 0f || playerView.getScaleX() != 1f) {
+                    springBackStripDragVisuals(playerView);
+                    return true;
+                }
+                if (direction == PlaybackNavigationRules.STRIP_SWIPE_UP
+                        && mStyle.isModern()
                         && getActivity() instanceof MobilePlaybackActivity) {
                     ((MobilePlaybackActivity) getActivity()).toggleFullscreen();
                     return true;
                 }
                 return false;
             }
+
             case MotionEvent.ACTION_CANCEL:
                 mStripDownInVideo = false;
-                return false;
+                boolean wasSwiping = mStripSwipingDown;
+                mStripSwipingDown = false;
+                if (wasSwiping || playerView.getTranslationY() != 0f || playerView.getScaleX() != 1f) {
+                    springBackStripDragVisuals(playerView);
+                }
+                return wasSwiping;
+
             default:
                 return false;
         }
     }
 
+    private void applyStripDragVisuals(@NonNull View playerView, float progress) {
+        if (playerView.getWidth() <= 0 || playerView.getHeight() <= 0) {
+            return;
+        }
+        float density = getResources().getDisplayMetrics().density;
+        float panelAlpha = PlaybackNavigationRules.computeStripPanelAlpha(progress);
+        float chromeAlpha = Math.max(0f, 1f - progress * 2.5f);
+
+        if (mPanel != null) {
+            mPanel.animate().cancel();
+            mPanel.setAlpha(panelAlpha);
+            mPanel.setTranslationY(progress * 52f * density);
+        }
+        View chrome = getActivity() != null ? getActivity().findViewById(R.id.mobile_modern_chrome) : null;
+        if (chrome != null) {
+            chrome.animate().cancel();
+            chrome.setAlpha(chromeAlpha);
+        }
+        if (mShortsNavBar != null && mShortsNavBar.getVisibility() == View.VISIBLE) {
+            mShortsNavBar.animate().cancel();
+            mShortsNavBar.setAlpha(panelAlpha);
+        }
+
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        float miniW = PlaybackNavigationRules.computeMiniCardWidthPx(screenW, density);
+        float miniH = miniW * 9f / 16f;
+        float destLeft = screenW - 12f * density - miniW;
+        float destTop = screenH - 68f * density - miniH;
+
+        float stripW = playerView.getWidth();
+        float stripH = playerView.getHeight();
+        float currentTx = playerView.getTranslationX();
+        float currentTy = playerView.getTranslationY();
+        int[] loc = new int[2];
+        playerView.getLocationOnScreen(loc);
+        float restLeft = loc[0] - currentTx;
+        float restTop = loc[1] - currentTy;
+
+        float visualT = progress * 0.45f;
+        float targetScaleX = PlaybackNavigationRules.lerp(1f, miniW / stripW, visualT);
+        float targetScaleY = PlaybackNavigationRules.lerp(1f, miniH / stripH, visualT);
+        float targetTx = PlaybackNavigationRules.lerp(0f, destLeft - restLeft, visualT);
+        float targetTy = PlaybackNavigationRules.lerp(0f, destTop - restTop, visualT);
+
+        playerView.animate().cancel();
+        playerView.setPivotX(0f);
+        playerView.setPivotY(0f);
+        playerView.setScaleX(targetScaleX);
+        playerView.setScaleY(targetScaleY);
+        playerView.setTranslationX(targetTx);
+        playerView.setTranslationY(targetTy);
+        setRoundedClip(playerView, 12f * density * progress);
+    }
+
+    private void springBackStripDragVisuals(@NonNull View playerView) {
+        playerView.animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationX(0f)
+                .translationY(0f)
+                .setDuration(180)
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(() -> setRoundedClip(playerView, 0f))
+                .start();
+        if (mPanel != null) {
+            mPanel.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(180)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        }
+        View chrome = getActivity() != null ? getActivity().findViewById(R.id.mobile_modern_chrome) : null;
+        if (chrome != null) {
+            chrome.animate().alpha(1f).setDuration(150).start();
+        }
+        if (mShortsNavBar != null && mShortsNavBar.getVisibility() == View.VISIBLE) {
+            mShortsNavBar.animate().alpha(1f).setDuration(150).start();
+        }
+    }
+
+    private void resetStripDragVisuals(@Nullable View playerView) {
+        if (playerView != null) {
+            playerView.animate().cancel();
+            playerView.setScaleX(1f);
+            playerView.setScaleY(1f);
+            playerView.setTranslationX(0f);
+            playerView.setTranslationY(0f);
+            setRoundedClip(playerView, 0f);
+        }
+        if (mPanel != null) {
+            mPanel.animate().cancel();
+            mPanel.setAlpha(1f);
+            mPanel.setTranslationY(0f);
+        }
+        View chrome = getActivity() != null ? getActivity().findViewById(R.id.mobile_modern_chrome) : null;
+        if (chrome != null) {
+            chrome.animate().cancel();
+            chrome.setAlpha(1f);
+        }
+        if (mShortsNavBar != null) {
+            mShortsNavBar.animate().cancel();
+            mShortsNavBar.setAlpha(1f);
+        }
+    }
+
+    private static RectF captureViewScreenBounds(@NonNull View view) {
+        int[] loc = new int[2];
+        view.getLocationOnScreen(loc);
+        float w = view.getWidth() * view.getScaleX();
+        float h = view.getHeight() * view.getScaleY();
+        return new RectF(loc[0], loc[1], loc[0] + w, loc[1] + h);
+    }
+
+    private static void setRoundedClip(@NonNull View view, final float radiusPx) {
+        if (radiusPx <= 0.5f) {
+            view.setClipToOutline(false);
+            view.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+            return;
+        }
+        view.setClipToOutline(true);
+        view.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, Outline outline) {
+                outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radiusPx);
+            }
+        });
+    }
+
+    private boolean hitsStripSeekBar(float rawX, float rawY, View playerView) {
+        View modernSeek = getActivity() != null ? getActivity().findViewById(R.id.modern_seek) : null;
+        if (viewContainsRawWithPad(modernSeek, rawX, rawY)) {
+            return true;
+        }
+        View classicSeek = playerView != null ? playerView.findViewById(R.id.playback_progress) : null;
+        return viewContainsRawWithPad(classicSeek, rawX, rawY);
+    }
+
+    private boolean viewContainsRawWithPad(View v, float rawX, float rawY) {
+        if (v == null || v.getVisibility() != View.VISIBLE || !v.isShown()) {
+            return false;
+        }
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        float pad = 12f * getResources().getDisplayMetrics().density;
+        return rawX >= loc[0] && rawX <= loc[0] + v.getWidth()
+                && rawY >= loc[1] - pad && rawY <= loc[1] + v.getHeight() + pad;
+    }
+
+    private void cancelStripDownstreamTouches(MotionEvent event) {
+        MotionEvent cancel = MotionEvent.obtain(event);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        replayTouch(cancel);
+        if (getActivity() != null) {
+            getActivity().getWindow().superDispatchTouchEvent(cancel);
+        }
+        cancel.recycle();
+    }
+
     /**
-     * Swipes start only in the landscape full-screen player with the controls hidden, and not near
-     * an edge, where the system's own swipes (notification shade, back gesture) live.
+     * Swipes start only in the full-screen player with the controls hidden, and not near an edge,
+     * where the system's own swipes (notification shade, back gesture) live.
      */
     private boolean swipeCanStart(MotionEvent down, View playerView) {
-        if (!mSwipeEnabled || mLayoutState != 0 || isInPipMode() || isOverlayShown()
-                || getResources().getConfiguration().orientation != Configuration.ORIENTATION_LANDSCAPE) {
+        if (!mSwipeEnabled || mLayoutState != 0 || isInPipMode() || isOverlayShown()) {
             return false;
         }
         float density = getResources().getDisplayMetrics().density;
@@ -964,10 +1380,22 @@ public class MobilePlaybackFragment extends PlaybackFragment {
                 && down.getY() > edgeY && down.getY() < playerView.getHeight() - edgeY;
     }
 
-    /** Pinch to zoom works in the landscape full-screen player, controls showing or not. */
+    /** Pinch to zoom & rotate works in landscape or portrait full-screen, controls showing or not. */
     private boolean pinchCanWatch() {
-        return mLayoutState == 0 && !isInPipMode()
-                && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        return mLayoutState == 0 && !isInPipMode();
+    }
+
+    /** Single-finger pan works while zoomed in inside full-screen, without blocking controls. */
+    private boolean panCanStart(MotionEvent down, View playerView) {
+        if (mPinch == null || !mPinch.isZoomed() || !pinchCanWatch() || down.getY() > playerView.getBottom()) {
+            return false;
+        }
+        if (isOverlayShown() && getActivity() != null) {
+            return !hitsPlayerControl(getActivity().getWindow().getDecorView(),
+                    down.getRawX(), down.getRawY(),
+                    playerView.getWidth() * playerView.getHeight() / 2);
+        }
+        return true;
     }
 
     /**
@@ -1233,7 +1661,9 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         // Strip mode now also covers Shorts: the player becomes a top-aligned aspect-ratio strip
         // instead of a vertically-centered full-screen surface. Regular videos get a 16:9 strip with
         // the up-next panel below; a Short gets a 9:16 strip with the Shorts info bar + action rail.
-        boolean strip = portrait && !inPip && video != null;
+        boolean portraitFullscreen = getActivity() instanceof MobilePlaybackActivity
+                && ((MobilePlaybackActivity) getActivity()).isPortraitFullscreen();
+        boolean strip = portrait && !inPip && video != null && !(!isShorts && portraitFullscreen);
         boolean showPanel = strip && !isShorts;
         String ratio = isShorts ? "H,9:16" : "H,16:9";
 
@@ -1245,7 +1675,7 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         // the layout state but do change whether the modern controls belong on screen.
         applyCutoutPadding();
         if (mModernChrome != null) {
-            mModernChrome.applyOrientation(!portrait);
+            mModernChrome.applyOrientation(!portrait, portrait && portraitFullscreen);
             mModernChrome.sync();
         }
         updateExitFullscreenButton();
@@ -1348,6 +1778,13 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         }
         set.applyTo(mRoot);
 
+        if (layoutState == 1) {
+            maybeRunExpandFromMiniAnimation();
+        } else {
+            mPendingExpandBounds = null;
+            resetStripDragVisuals(getView());
+        }
+
         // Non-Shorts: make sure the Leanback control row is visible (a prior Shorts auto-hide
         // may have left it INVISIBLE). In Shorts, setShortsChrome owns the control row.
         if (layoutState != 2) setShortsControlsVisible(!mStyle.isModern());
@@ -1366,6 +1803,89 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             showControlsOverlay(false);
             revealShortsChrome();
         }
+    }
+
+    /**
+     * Animates the video strip from the mini-player's bottom-right bounds back up to the 16:9
+     * top slot while rising and fading in the below-video panel.
+     */
+    private void maybeRunExpandFromMiniAnimation() {
+        final RectF expandBounds = mPendingExpandBounds;
+        final View playerView = getView();
+        if (expandBounds == null || playerView == null || mRoot == null) {
+            mPendingExpandBounds = null;
+            return;
+        }
+        mPendingExpandBounds = null;
+        final float density = getResources().getDisplayMetrics().density;
+        final View chrome = getActivity() != null ? getActivity().findViewById(R.id.mobile_modern_chrome) : null;
+
+        mRoot.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                if (mRoot != null && mRoot.getViewTreeObserver().isAlive()) {
+                    mRoot.getViewTreeObserver().removeOnPreDrawListener(this);
+                }
+                int stripW = playerView.getWidth();
+                int stripH = playerView.getHeight();
+                if (stripW <= 0 || stripH <= 0 || expandBounds.width() <= 0f || expandBounds.height() <= 0f) {
+                    resetStripDragVisuals(playerView);
+                    return true;
+                }
+                int[] stripLoc = new int[2];
+                playerView.getLocationOnScreen(stripLoc);
+
+                playerView.setPivotX(0f);
+                playerView.setPivotY(0f);
+                playerView.setScaleX(expandBounds.width() / stripW);
+                playerView.setScaleY(expandBounds.height() / stripH);
+                playerView.setTranslationX(expandBounds.left - stripLoc[0]);
+                playerView.setTranslationY(expandBounds.top - stripLoc[1]);
+                setRoundedClip(playerView, 12f * density);
+
+                playerView.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .translationX(0f)
+                        .translationY(0f)
+                        .setDuration(280)
+                        .setInterpolator(new FastOutSlowInInterpolator())
+                        .withEndAction(() -> setRoundedClip(playerView, 0f))
+                        .start();
+
+                if (mPanel != null) {
+                    mPanel.setAlpha(0f);
+                    mPanel.setTranslationY(72f * density);
+                    mPanel.animate()
+                            .alpha(1f)
+                            .translationY(0f)
+                            .setStartDelay(40)
+                            .setDuration(260)
+                            .setInterpolator(new DecelerateInterpolator())
+                            .start();
+                }
+                if (mShortsNavBar != null && mShortsNavBar.getVisibility() == View.VISIBLE) {
+                    mShortsNavBar.setAlpha(0f);
+                    mShortsNavBar.setTranslationY(24f * density);
+                    mShortsNavBar.animate()
+                            .alpha(1f)
+                            .translationY(0f)
+                            .setStartDelay(40)
+                            .setDuration(240)
+                            .setInterpolator(new DecelerateInterpolator())
+                            .start();
+                }
+                if (chrome != null) {
+                    chrome.setAlpha(0f);
+                    chrome.animate()
+                            .alpha(1f)
+                            .setStartDelay(100)
+                            .setDuration(180)
+                            .start();
+                }
+                return true;
+            }
+        });
     }
 
     @Override
@@ -1434,6 +1954,7 @@ public class MobilePlaybackFragment extends PlaybackFragment {
 
     @Override
     public void setSeekBarSegments(List<SeekBarSegment> segments) {
+        mLastSeekBarSegments = segments;
         super.setSeekBarSegments(segments);
         // The Modern seek bar mirrors the Leanback one (SponsorBlock + chapter marks).
         if (mModernChrome != null) mModernChrome.setSeekBarSegments(segments);
@@ -1557,21 +2078,47 @@ public class MobilePlaybackFragment extends PlaybackFragment {
     private void updateExitFullscreenButton() {
         View root = getView();
         if (root == null) return;
+        boolean showInFullscreen = mLayoutState == 0 && !mStyle.isModern() && !isInPipMode();
         View button = root.findViewById(R.id.mobile_exit_fullscreen);
-        if (button == null) return;
-        // Landscape from the window's own size: mLayoutState starts at 0 before the first layout,
-        // and the resources' orientation can lag behind a rotation (see PR #76).
-        View decor = getActivity() != null ? getActivity().getWindow().getDecorView() : null;
-        boolean landscape = decor != null && decor.getWidth() > decor.getHeight();
-        int visibility = landscape && mLayoutState == 0 && !mStyle.isModern() && !isInPipMode()
-                ? View.VISIBLE : View.GONE;
-        if (button.getVisibility() != visibility) button.setVisibility(visibility);
-        if (!button.hasOnClickListeners()) {
-            button.setOnClickListener(v -> {
-                if (getActivity() instanceof MobilePlaybackActivity) {
-                    ((MobilePlaybackActivity) getActivity()).toggleFullscreen();
-                }
-            });
+        if (button != null) {
+            int visibility = showInFullscreen ? View.VISIBLE : View.GONE;
+            if (button.getVisibility() != visibility) button.setVisibility(visibility);
+            if (!button.hasOnClickListeners()) {
+                button.setOnClickListener(v -> {
+                    if (getActivity() instanceof MobilePlaybackActivity) {
+                        ((MobilePlaybackActivity) getActivity()).toggleFullscreen();
+                    }
+                });
+            }
+        }
+        View classicQualityBtn = root.findViewById(R.id.mobile_quality);
+        if (classicQualityBtn != null) {
+            int visibility = showInFullscreen ? View.VISIBLE : View.GONE;
+            if (classicQualityBtn.getVisibility() != visibility) classicQualityBtn.setVisibility(visibility);
+            if (!classicQualityBtn.hasOnClickListeners()) {
+                classicQualityBtn.setOnClickListener(v ->
+                        PlaybackPresenter.instance(getContext()).onButtonClicked(R.id.lb_control_high_quality, 0));
+            }
+        }
+        View portraitBtn = root.findViewById(R.id.mobile_portrait_fullscreen);
+        if (portraitBtn != null) {
+            int visibility = showInFullscreen ? View.VISIBLE : View.GONE;
+            if (portraitBtn.getVisibility() != visibility) portraitBtn.setVisibility(visibility);
+            boolean active = getActivity() instanceof MobilePlaybackActivity
+                    && ((MobilePlaybackActivity) getActivity()).isPortraitFullscreen();
+            if (portraitBtn instanceof ImageView) {
+                ((ImageView) portraitBtn).setImageResource(active
+                        ? R.drawable.ic_modern_portrait_fullscreen_exit
+                        : R.drawable.ic_modern_portrait_fullscreen);
+                ((ImageView) portraitBtn).setColorFilter(active ? 0xFF3EA6FF : 0xFFFFFFFF);
+            }
+            if (!portraitBtn.hasOnClickListeners()) {
+                portraitBtn.setOnClickListener(v -> {
+                    if (getActivity() instanceof MobilePlaybackActivity) {
+                        ((MobilePlaybackActivity) getActivity()).togglePortraitFullscreen();
+                    }
+                });
+            }
         }
     }
 
@@ -1603,8 +2150,8 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         if (root == null) return;
         View video = root.findViewById(R.id.surface_root);
         if (video == null) return;
-        // A pinch zoom (#85) owns the video's transform while it's zoomed in.
-        if (mPinch != null && mPinch.isZoomed()) return;
+        // A pinch zoom/rotation (#85) owns the video's transform while active.
+        if (mPinch != null && (mPinch.isZoomed() || mPinch.getRotationDeg() != 0)) return;
         float shift = 0f;
         if (mLayoutState == 2 && !mShortsFit && root.getWidth() > 0 && root.getHeight() > 0) {
             float strip = Math.min(root.getHeight(), root.getWidth() * 16f / 9f);
@@ -2213,6 +2760,19 @@ public class MobilePlaybackFragment extends PlaybackFragment {
                 }
             });
         }
+        mQualityBtn = activity.findViewById(R.id.mobile_video_quality);
+        if (mQualityBtn != null) {
+            mQualityBtn.setOnClickListener(v ->
+                    PlaybackPresenter.instance(getContext()).onButtonClicked(R.id.lb_control_high_quality, 0));
+        }
+        mPortraitFullscreenBtn = activity.findViewById(R.id.mobile_video_portrait_fullscreen);
+        if (mPortraitFullscreenBtn != null) {
+            mPortraitFullscreenBtn.setOnClickListener(v -> {
+                if (getActivity() instanceof MobilePlaybackActivity) {
+                    ((MobilePlaybackActivity) getActivity()).togglePortraitFullscreen();
+                }
+            });
+        }
         mSettingsBtn = activity.findViewById(R.id.mobile_video_settings);
         if (mSettingsBtn != null) {
             mSettingsBtn.setOnClickListener(v -> openAppSettings());
@@ -2237,6 +2797,7 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         mRoot.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             anchorSeekBarToVideo();
             updateExitFullscreenButton(); // the control row is inflated lazily and rebound by glue rebuilds
+            if (mPinch != null) mPinch.onLayoutChanged();
             if (mLayoutState != 2) return;
             applyShortsDocks();
             applyOverlayDecorVisibility(true);
@@ -2350,6 +2911,9 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         initTapDetector(activity);
         mSwipe = SwipeGestures.create(activity);
         mPinch = PinchZoom.create(activity, mPinchTarget);
+        if (mPinch != null && mPendingRotationAngle != 0) {
+            mPinch.setRotationAngle(mPendingRotationAngle);
+        }
         initCutoutGuard(activity);
 
         return true;

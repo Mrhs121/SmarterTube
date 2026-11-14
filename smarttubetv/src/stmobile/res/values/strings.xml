@@ -67,6 +67,9 @@
     <string name="mobile_app_settings">App settings</string>
     <string name="mobile_player_fullscreen">Full screen</string>
     <string name="mobile_player_exit_fullscreen">Exit full screen</string>
+    <string name="mobile_player_portrait_fullscreen">Portrait full screen</string>
+    <string name="mobile_player_exit_portrait_fullscreen">Exit portrait full screen</string>
+    <string name="mobile_player_quality">Video quality</string>
     <string name="mobile_player_like">Like</string>
     <string name="mobile_player_dislike">Dislike</string>
     <string name="mobile_player_comments">Comments</string>
@@ -130,5 +133,6 @@
 
     <!-- Pinch to zoom in the landscape player (#85) -->
     <string name="mobile_zoom_fit">Original</string>
+    <string name="mobile_video_more">More options</string>
 
 </resources>

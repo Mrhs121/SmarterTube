@@ -8,4 +8,5 @@
 -->
 <resources>
     <integer name="mobile_grid_span">2</integer>
+    <integer name="mobile_home_span">2</integer>
 </resources>

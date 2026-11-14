@@ -127,6 +127,11 @@ public abstract class MobileActivity extends MotherActivity {
         return true;
     }
 
+    /** Whether floating mini-player overlays may attach above this activity. */
+    public boolean supportsMiniPlayerOverlay() {
+        return registersInViewStack();
+    }
+
     @Override
     protected void initTheme() {
         setTheme(R.style.Theme_SmarterTube_Mobile);

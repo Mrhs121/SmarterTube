@@ -1,6 +1,7 @@
 package com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.renderer;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.Renderer;
@@ -159,7 +160,11 @@ public class CustomOverridesRenderersFactory extends CustomRenderersFactoryBase 
                     new DebugInfoMediaCodecVideoRenderer(context, mediaCodecSelector, allowedVideoJoiningTimeMs, drmSessionManager,
                         playClearSamplesWithoutKeys, enableDecoderFallback, eventHandler, eventListener, MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY);
 
-            videoRenderer.enableSetOutputSurfaceWorkaround(true); // Force enable?
+            // Only apply the output-surface workaround on Android < 10 (Q) where setOutputSurface
+            // driver bugs existed and only if the tweak is enabled; forcing it on Android 10+
+            // releases and re-inits the HW decoder on every surface handoff (multi-second freeze).
+            videoRenderer.enableSetOutputSurfaceWorkaround(
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && mPlayerTweaksData.isSetOutputSurfaceWorkaroundEnabled());
 
             replaceVideoRenderer(out, videoRenderer);
 
@@ -173,7 +178,8 @@ public class CustomOverridesRenderersFactory extends CustomRenderersFactoryBase 
         videoRenderer.enableFrameDropFix(mPlayerTweaksData.isAmazonFrameDropFixEnabled());
         videoRenderer.enableFrameDropSonyFix(mPlayerTweaksData.isSonyFrameDropFixEnabled());
         videoRenderer.enableAmlogicFix(mPlayerTweaksData.isAmlogicFixEnabled());
-        videoRenderer.enableSetOutputSurfaceWorkaround(true); // Force enable?
+        videoRenderer.enableSetOutputSurfaceWorkaround(
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && mPlayerTweaksData.isSetOutputSurfaceWorkaroundEnabled());
 
         replaceVideoRenderer(out, videoRenderer);
     }

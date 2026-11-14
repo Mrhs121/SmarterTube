@@ -199,6 +199,32 @@
                 android:maxLines="2"
                 android:ellipsize="end" />
 
+            <!-- Video resolution shortcut; Classic style only (Modern has its own button on the video). -->
+            <ImageView
+                android:id="@+id/mobile_video_quality"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="8dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_modern_quality"
+                android:tint="#FFCCCCCC"
+                android:background="@drawable/bg_borderless_feedback"
+                android:contentDescription="@string/mobile_player_quality"
+                android:visibility="gone" />
+
+            <!-- Portrait full-screen shortcut; Classic style only (Modern has its own button on the video). -->
+            <ImageView
+                android:id="@+id/mobile_video_portrait_fullscreen"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="8dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_modern_portrait_fullscreen"
+                android:tint="#FFCCCCCC"
+                android:background="@drawable/bg_borderless_feedback"
+                android:contentDescription="@string/mobile_player_portrait_fullscreen"
+                android:visibility="gone" />
+
             <!-- Full-screen shortcut; Classic style only (Modern has its own button on the video; #62). -->
             <ImageView
                 android:id="@+id/mobile_video_fullscreen"

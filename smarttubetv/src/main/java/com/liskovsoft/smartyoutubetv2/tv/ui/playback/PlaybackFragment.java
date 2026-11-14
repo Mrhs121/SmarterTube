@@ -396,13 +396,88 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
             return;
         }
 
+        if (adoptRunningEngine()) {
+            return;
+        }
+
         createPlayerObjects();
 
         mPlaybackPresenter.setView(this); // replaced by the embed player?
         mPlaybackPresenter.onEngineInitialized();
     }
 
+    /** Overridable hook (mobile): reattach a running player session without rebuffering. */
+    protected boolean adoptRunningEngine() {
+        return false;
+    }
+
+    /** Attaches an already-running ExoPlayer session and rebuilds only the UI/session glue around it. */
+    protected void attachAdoptedEngine(
+            SimpleExoPlayer player,
+            ExoPlayerController controller,
+            ExoPlayerInitializer initializer) {
+        mPlayer = player;
+        mExoPlayerController = controller;
+        mPlayerInitializer = initializer;
+
+        createPlayerGlue();
+        createMediaSession();
+        initializePlayerRows();
+        initializeGlobalClock();
+        initializeGlobalEndingTime();
+        initializePixelRatio();
+        initializeDoubleTapHandler();
+
+        mPlaybackPresenter.setView(this);
+    }
+
+    /** Tears down fragment UI glue while leaving the underlying ExoPlayer running for handoff. */
+    protected void detachEngineForHandoff() {
+        final SimpleExoPlayer handoffPlayer = mPlayer;
+        setSurfaceHolderCallback(null);
+        destroyPlayerUiObjects();
+        mPlayer = null;
+        if (handoffPlayer != null) {
+            // Keep a one-shot guard so destroying the old Surface clears it ONLY if no new Surface has taken over.
+            setSurfaceHolderCallback(new android.view.SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(android.view.SurfaceHolder holder) {
+                }
+
+                @Override
+                public void surfaceChanged(android.view.SurfaceHolder holder, int format, int width, int height) {
+                }
+
+                @Override
+                public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+                    handoffPlayer.clearVideoSurface(holder.getSurface());
+                    setSurfaceHolderCallback(null);
+                }
+            });
+        }
+    }
+
+    protected SimpleExoPlayer getExoPlayer() {
+        return mPlayer;
+    }
+
+    protected ExoPlayerController getExoPlayerController() {
+        return mExoPlayerController;
+    }
+
+    protected ExoPlayerInitializer getExoPlayerInitializer() {
+        return mPlayerInitializer;
+    }
+
     private void destroyPlayerObjects() {
+        destroyPlayerUiObjects();
+        mPlayerInitializer.release();
+        // Fix access calls when player isn't initialized
+        mExoPlayerController.release();
+        mPlayer = null;
+    }
+
+    private void destroyPlayerUiObjects() {
         setAdapter(null); // PlayerGlue->LeanbackPlayerAdapter->Context memory leak fix
         if (mRowsAdapter != null) {
             mRowsAdapter.clear();
@@ -445,10 +520,6 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
             mDebugInfoManager.show(false);
             mDebugInfoManager = null;
         }
-        mPlayerInitializer.release();
-        // Fix access calls when player isn't initialized
-        mExoPlayerController.release();
-        mPlayer = null;
         mSubtitleManager = null;
         if (mYouTubeOverlay != null) {
             mYouTubeOverlay

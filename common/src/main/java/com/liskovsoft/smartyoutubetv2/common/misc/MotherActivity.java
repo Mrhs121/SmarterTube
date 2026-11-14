@@ -193,6 +193,15 @@ public class MotherActivity extends FragmentActivity {
         }
     }
 
+    /** Finishes only this Activity instance without parent relaunch or PiP/player shutdown hooks. */
+    protected final void finishActivityOnly() {
+        try {
+            super.finish();
+        } catch (Exception e) {
+            // Ignored
+        }
+    }
+
     @Override
     protected void attachBaseContext(Context context) {
         Context contextWrapper = null;

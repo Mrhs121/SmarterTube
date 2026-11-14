@@ -30,6 +30,7 @@ import com.liskovsoft.smartyoutubetv2.mobile.ui.channeluploads.MobileChannelUplo
 import com.liskovsoft.smartyoutubetv2.mobile.ui.dialogs.MobileAppDialogActivity;
 import com.liskovsoft.smartyoutubetv2.mobile.notifications.NotificationPollWorker;
 import com.liskovsoft.smartyoutubetv2.mobile.stats.StatsReporter;
+import com.liskovsoft.smartyoutubetv2.mobile.ui.playback.MobileMiniPlayer;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.playback.MobilePlaybackActivity;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.prefs.MobileNotificationPrefs;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.prefs.MobilePlayerStylePrefs;
@@ -90,6 +91,27 @@ public class MobileApplication extends MainApplication {
             @Override
             public void onActivityStarted(Activity activity) {
                 StatsReporter.onForeground(activity);
+                MobileMiniPlayer.getInstance().onActivityStarted(activity);
+            }
+
+            @Override
+            public void onActivityResumed(Activity activity) {
+                MobileMiniPlayer.getInstance().onActivityResumed(activity);
+            }
+
+            @Override
+            public void onActivityPaused(Activity activity) {
+                MobileMiniPlayer.getInstance().onActivityPaused(activity);
+            }
+
+            @Override
+            public void onActivityStopped(Activity activity) {
+                MobileMiniPlayer.getInstance().onActivityStopped(activity);
+            }
+
+            @Override
+            public void onActivityDestroyed(Activity activity) {
+                MobileMiniPlayer.getInstance().onActivityDestroyed(activity);
             }
         });
 

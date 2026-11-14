@@ -39,8 +39,7 @@ public class SurfacePlaybackFragment extends PlaybackSupportFragment {
         if (root == null) {
             throw new IllegalStateException("Can't create root of SurfacePlaybackFragment");
         }
-        mVideoSurfaceWrapper = (PlayerTweaksData.instance(getContext()).isTextureViewEnabled() ||
-                PlayerData.instance(getContext()).getRotationAngle() != 0) ?
+        mVideoSurfaceWrapper = shouldUseTextureView() ?
                 new TextureViewWrapper(getContext(), root) : new SurfaceViewWrapper(getContext(), root);
         mVideoSurfaceRoot = root.findViewById(com.liskovsoft.smartyoutubetv2.tv.R.id.surface_root);
         mVideoSurfaceRoot.addView(mVideoSurfaceWrapper.getSurfaceView(), 0);
@@ -138,7 +137,12 @@ public class SurfacePlaybackFragment extends PlaybackSupportFragment {
         }
     }
 
-    private void scaleIfNeeded() {
+    protected boolean shouldUseTextureView() {
+        return PlayerTweaksData.instance(getContext()).isTextureViewEnabled() ||
+                PlayerData.instance(getContext()).getRotationAngle() != 0;
+    }
+
+    protected void scaleIfNeeded() {
         if (!(mVideoSurfaceWrapper instanceof TextureViewWrapper)) {
             return;
         }

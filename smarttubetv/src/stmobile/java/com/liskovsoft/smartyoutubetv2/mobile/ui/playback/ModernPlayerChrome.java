@@ -27,6 +27,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerUI;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.SeekBarSegment;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.other.VideoPlayerGlue;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.previewtimebar.StoryboardManager;
@@ -71,6 +72,8 @@ final class ModernPlayerChrome {
     private final ImageButton mCc;
     private final ImageButton mPlayPause;
     private final TextView mTime;
+    private final ImageButton mQuality;
+    private final ImageButton mPortraitFullscreen;
     private final ImageButton mFullscreen;
     private final ModernSeekBar mSeek;
     private final View mTopBar;
@@ -101,6 +104,7 @@ final class ModernPlayerChrome {
         }
     };
     private boolean mLandscape;
+    private boolean mPortraitFullscreenMode;
     private List<Action> mMoreActions = new ArrayList<>();
     private boolean mUserSeeking;
     private androidx.core.graphics.Insets mCutoutBands = androidx.core.graphics.Insets.NONE;
@@ -122,6 +126,8 @@ final class ModernPlayerChrome {
         mCc = mRoot.findViewById(R.id.modern_cc);
         mPlayPause = mRoot.findViewById(R.id.modern_play_pause);
         mTime = mRoot.findViewById(R.id.modern_time);
+        mQuality = mRoot.findViewById(R.id.modern_quality);
+        mPortraitFullscreen = mRoot.findViewById(R.id.modern_portrait_fullscreen);
         mFullscreen = mRoot.findViewById(R.id.modern_fullscreen);
         mSeek = mRoot.findViewById(R.id.modern_seek);
         mTopBar = mRoot.findViewById(R.id.modern_top_bar);
@@ -166,6 +172,16 @@ final class ModernPlayerChrome {
             }
             update();
         });
+        if (mQuality != null) {
+            mQuality.setOnClickListener(v -> openQualitySheet());
+        }
+        if (mPortraitFullscreen != null) {
+            mPortraitFullscreen.setOnClickListener(v -> {
+                if (mActivity instanceof MobilePlaybackActivity) {
+                    ((MobilePlaybackActivity) mActivity).togglePortraitFullscreen();
+                }
+            });
+        }
         mFullscreen.setOnClickListener(v -> {
             if (mActivity instanceof MobilePlaybackActivity) {
                 ((MobilePlaybackActivity) mActivity).toggleFullscreen();
@@ -323,12 +339,14 @@ final class ModernPlayerChrome {
         }
     }
 
-    /** Portrait strip vs landscape full screen. */
-    void applyOrientation(boolean landscape) {
+    /** Portrait strip vs landscape/portrait full screen. */
+    void applyOrientation(boolean landscape, boolean portraitFullscreen) {
         mLandscape = landscape;
-        // Portrait keeps the title block's space (it pushes CC/settings to the right) but not its text.
-        mTitleBlock.setVisibility(landscape ? View.VISIBLE : View.INVISIBLE);
-        mActions.setVisibility(landscape ? View.VISIBLE : View.GONE);
+        mPortraitFullscreenMode = portraitFullscreen;
+        boolean fullscreenChrome = landscape || portraitFullscreen;
+        // Portrait strip keeps the title block's space (it pushes CC/settings to the right) but not its text.
+        mTitleBlock.setVisibility(fullscreenChrome ? View.VISIBLE : View.INVISIBLE);
+        mActions.setVisibility(fullscreenChrome ? View.VISIBLE : View.GONE);
         int previewWidth = dp(landscape ? PREVIEW_WIDTH_LANDSCAPE_DP : PREVIEW_WIDTH_DP);
         ViewGroup.LayoutParams imageLp = mPreviewImage.getLayoutParams();
         imageLp.width = previewWidth;
@@ -339,6 +357,17 @@ final class ModernPlayerChrome {
         mPreviewChapter.setLayoutParams(chapterLp);
         applySidePadding();
         mFullscreen.setImageResource(landscape ? R.drawable.ic_modern_fullscreen_exit : R.drawable.ic_modern_fullscreen);
+        mFullscreen.setContentDescription(mActivity.getString(
+                landscape ? R.string.mobile_player_exit_fullscreen : R.string.mobile_player_fullscreen));
+        if (mPortraitFullscreen != null) {
+            mPortraitFullscreen.setImageResource(portraitFullscreen
+                    ? R.drawable.ic_modern_portrait_fullscreen_exit
+                    : R.drawable.ic_modern_portrait_fullscreen);
+            tint(mPortraitFullscreen, portraitFullscreen);
+            mPortraitFullscreen.setContentDescription(mActivity.getString(
+                    portraitFullscreen ? R.string.mobile_player_exit_portrait_fullscreen
+                            : R.string.mobile_player_portrait_fullscreen));
+        }
         if (mSheet.getVisibility() == View.VISIBLE) {
             closeSheet();
         }
@@ -354,7 +383,8 @@ final class ModernPlayerChrome {
         // Landscape runs edge to edge, so keep the controls off the edges, and off a notch band there.
         int left = mLandscape ? Math.max(dp(24), mCutoutBands.left) : 0;
         int right = mLandscape ? Math.max(dp(24), mCutoutBands.right) : 0;
-        mRoot.setPadding(left, 0, right, 0);
+        int bottom = (!mLandscape && mPortraitFullscreenMode) ? Math.max(dp(12), mCutoutBands.bottom) : 0;
+        mRoot.setPadding(left, 0, right, bottom);
     }
 
     void bindVideo(Video video) {
@@ -419,6 +449,17 @@ final class ModernPlayerChrome {
             mSheetList.setAdapter(null);
         }
         return true;
+    }
+
+    private void openQualitySheet() {
+        List<FormatItem> formats = mHost.getVideoFormats();
+        if (formats == null || formats.isEmpty()) {
+            clickAction(R.id.lb_control_high_quality);
+            return;
+        }
+        mSheetTitle.setText(R.string.title_video_formats);
+        mSheetList.setAdapter(new QualityAdapter(formats));
+        showSheet(Math.min(formats.size() * dp(SHEET_ROW_HEIGHT_DP), maxSheetListHeight()));
     }
 
     private void openActionsSheet() {
@@ -535,8 +576,9 @@ final class ModernPlayerChrome {
                 || id == R.id.action_channel) {
             return true;
         }
-        // Portrait only: the panel has Subscribe and Queue buttons, and the title opens the description.
-        return !mLandscape && (id == R.id.action_subscribe || id == R.id.action_playback_queue
+        // Portrait strip only: the panel has Subscribe and Queue buttons, and the title opens the description.
+        boolean fullscreenChrome = mLandscape || mPortraitFullscreenMode;
+        return !fullscreenChrome && (id == R.id.action_subscribe || id == R.id.action_playback_queue
                 || id == R.id.action_info);
     }
 
@@ -693,6 +735,57 @@ final class ModernPlayerChrome {
                 closeSheet();
                 VideoPlayerGlue glue = mHost.glue();
                 return glue != null && glue.onActionLongClicked(action);
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return mItems.size();
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            final ImageView icon;
+            final TextView label;
+
+            Holder(View view) {
+                super(view);
+                icon = view.findViewById(R.id.modern_sheet_row_icon);
+                label = view.findViewById(R.id.modern_sheet_row_label);
+            }
+        }
+    }
+
+    /** Resolution options shown from the in-player quality button. */
+    private final class QualityAdapter extends RecyclerView.Adapter<QualityAdapter.Holder> {
+        private final List<FormatItem> mItems;
+
+        QualityAdapter(List<FormatItem> items) {
+            mItems = items;
+        }
+
+        @NonNull
+        @Override
+        public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            return new Holder(LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.mobile_modern_sheet_row, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull Holder holder, int position) {
+            FormatItem format = mItems.get(position);
+            boolean selected = format.isSelected();
+            holder.icon.setImageResource(R.drawable.ic_modern_quality);
+            tint(holder.icon, selected);
+            CharSequence title = format.isDefault()
+                    ? mActivity.getString(R.string.option_disabled)
+                    : format.getTitle();
+            holder.label.setText(title != null ? title : "");
+            holder.label.setTextColor(selected ? ACTIVE_TINT : 0xFFFFFFFF);
+            holder.itemView.setOnClickListener(v -> {
+                closeSheet();
+                mHost.selectVideoFormat(format);
+                mHost.tickle();
+                update();
             });
         }
 

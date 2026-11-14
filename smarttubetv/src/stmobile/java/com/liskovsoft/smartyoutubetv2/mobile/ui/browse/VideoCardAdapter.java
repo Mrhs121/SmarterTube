@@ -1,14 +1,19 @@
 package com.liskovsoft.smartyoutubetv2.mobile.ui.browse;
 
+import android.graphics.Outline;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
@@ -185,6 +190,9 @@ public class VideoCardAdapter extends RecyclerView.Adapter<VideoCardAdapter.View
         }
         ViewHolder holder = new ViewHolder(view, viewType);
         holder.thumbFrame.getLayoutParams().height = thumbHeight(viewType, mCardWidth);
+        if (viewType != STYLE_PLAYLIST) {
+            applyRoundedCorners(holder.thumbFrame, 10f);
+        }
         return holder;
     }
 
@@ -272,6 +280,63 @@ public class VideoCardAdapter extends RecyclerView.Adapter<VideoCardAdapter.View
                 lp.bottomMargin = bottom;
                 badge.setLayoutParams(lp);
             }
+        }
+    }
+
+    private static final int[] AVATAR_PALETTE = {
+            0xFFD32F2F, 0xFF1976D2, 0xFF388E3C, 0xFF7B1FA2,
+            0xFFE64A19, 0xFF00796B, 0xFFC2185B, 0xFF5D4037,
+            0xFF303F9F, 0xFF0097A7
+    };
+
+    /** Clip a thumbnail frame to rounded corners cleanly (no per-image bitmap transform cost). */
+    public static void applyRoundedCorners(View frame, float radiusDp) {
+        if (frame == null || Build.VERSION.SDK_INT < 21) {
+            return;
+        }
+        final float radiusPx = radiusDp * frame.getResources().getDisplayMetrics().density;
+        frame.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radiusPx);
+            }
+        });
+        frame.setClipToOutline(true);
+    }
+
+    /** Single/two-line YouTube metadata format: "Author · 125万次观看 · 7小时前". */
+    public static String formatMetaLine(Video video) {
+        if (video == null) {
+            return "";
+        }
+        String author = video.getAuthor();
+        if (author == null || author.isEmpty()) {
+            CharSequence second = video.getSecondTitle();
+            return second != null ? second.toString() : "";
+        }
+        String stats = video.getSecondTitleAfterAuthor();
+        return stats != null && !stats.isEmpty() ? author + " • " + stats : author;
+    }
+
+    /** Populate a circular colored initial avatar badge for a video's channel/author. */
+    public static void bindChannelAvatar(TextView avatar, Video video) {
+        if (avatar == null) {
+            return;
+        }
+        String author = video != null ? video.getAuthor() : null;
+        if (author == null || author.trim().isEmpty()) {
+            avatar.setVisibility(View.GONE);
+            return;
+        }
+        String trimmed = author.trim();
+        avatar.setVisibility(View.VISIBLE);
+        avatar.setText(trimmed.substring(0, 1).toUpperCase());
+        int color = AVATAR_PALETTE[Math.abs(trimmed.hashCode()) % AVATAR_PALETTE.length];
+        Drawable bg = avatar.getBackground();
+        if (bg != null) {
+            Drawable wrapped = DrawableCompat.wrap(bg.mutate());
+            DrawableCompat.setTint(wrapped, color);
+            avatar.setBackground(wrapped);
         }
     }
 

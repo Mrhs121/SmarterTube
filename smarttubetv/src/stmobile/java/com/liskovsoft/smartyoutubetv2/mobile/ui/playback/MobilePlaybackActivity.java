@@ -38,6 +38,8 @@ public class MobilePlaybackActivity extends PlaybackActivity {
     // Full-screen button (#46): the orientation it forced, and a sensor watch that hands rotation
     // back to the device once the phone is physically turned to match.
     private int mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+    private boolean mPortraitFullscreen;
+    private boolean mMinimizing;
     private OrientationEventListener mOrientationWatch;
     // Hidden system bars (#47): how long a rotation takes to settle, and how long to wait before
     // hiding bars the system has shown again (so a ROM that keeps showing them isn't a tight loop).
@@ -47,6 +49,7 @@ public class MobilePlaybackActivity extends PlaybackActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        MobileMiniPlayer.getInstance().onPlaybackActivityLaunching(getIntent());
         super.onCreate(savedInstanceState);
 
         Fragment fragment =
@@ -61,6 +64,8 @@ public class MobilePlaybackActivity extends PlaybackActivity {
 
     @Override
     protected void onNewIntent(Intent intent) {
+        setIntent(intent);
+        MobileMiniPlayer.getInstance().onPlaybackActivityLaunching(intent);
         super.onNewIntent(intent);
         applyOrientationForCurrentVideo();
     }
@@ -84,12 +89,81 @@ public class MobilePlaybackActivity extends PlaybackActivity {
      */
     @Override
     public void onBackPressed() {
+        if (mMobileFragment != null && mMobileFragment.isModernSheetOpen()) {
+            mMobileFragment.closeModernSheet();
+            return;
+        }
+
+        if (exitFullscreenIfActive()) {
+            return;
+        }
+
         if (isInPipMode() || getPlayerData().getBackgroundMode() == PlayerData.BACKGROUND_MODE_PIP) {
             super.onBackPressed();
             return;
         }
 
         finishReally();
+    }
+
+    private boolean exitFullscreenIfActive() {
+        Video video = PlaybackPresenter.instance(this).getVideo();
+        boolean isShorts = video != null && video.isShorts;
+        boolean isLandscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        if (!PlaybackNavigationRules.shouldExitFullscreenOnBack(
+                isInPipMode(), isShorts, mPortraitFullscreen, isLandscape)) {
+            return false;
+        }
+        if (mPortraitFullscreen) {
+            togglePortraitFullscreen();
+        } else {
+            toggleFullscreen();
+        }
+        return true;
+    }
+
+    /**
+     * Minimizes the live player into the floating bottom-right mini-player without stopping playback.
+     */
+    public void minimizeToMiniPlayer() {
+        if (mMinimizing || isInPipMode() || mMobileFragment == null) {
+            return;
+        }
+        if (!mMobileFragment.handoffToMiniPlayer()) {
+            return;
+        }
+        mMinimizing = true;
+        if (isTaskRoot()) {
+            getViewManager().startParentView(this);
+        } else {
+            getViewManager().removeTop(this);
+        }
+        finishActivityOnly();
+        overridePendingTransition(0, 0);
+    }
+
+    @Override
+    public void finishReally() {
+        super.finishReally();
+        if (!mMinimizing && !isInPipMode()) {
+            applyReturnTransition();
+        }
+    }
+
+    @Override
+    public void finish() {
+        if (mMinimizing) {
+            finishActivityOnly();
+            return;
+        }
+        super.finish();
+        if (isFinishing() && !isInPipMode()) {
+            applyReturnTransition();
+        }
+    }
+
+    private void applyReturnTransition() {
+        overridePendingTransition(R.anim.mobile_slide_in_left, R.anim.mobile_slide_out_right);
     }
 
     /**
@@ -143,12 +217,11 @@ public class MobilePlaybackActivity extends PlaybackActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // Back closes an open Modern settings / More videos sheet (#46). Caught here, before the
-        // player's own key handling, which would otherwise treat Back as leaving the video.
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && mMobileFragment != null
-                && mMobileFragment.isModernSheetOpen()) {
-            if (event.getAction() == KeyEvent.ACTION_UP) {
-                mMobileFragment.closeModernSheet();
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK && !isInPipMode()) {
+            // Handle Back uniformly before Leanback's overlay handler swallows it just to fade OSD,
+            // so fullscreen Back exits fullscreen and non-fullscreen Back returns to Home.
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                onBackPressed();
             }
             return true;
         }
@@ -167,6 +240,33 @@ public class MobilePlaybackActivity extends PlaybackActivity {
         return super.dispatchTouchEvent(event);
     }
 
+    public boolean isPortraitFullscreen() {
+        return mPortraitFullscreen;
+    }
+
+    /**
+     * Portrait full-screen toggle: keep/force portrait orientation while showing the video
+     * full-screen (hiding the below-video panel). Tapping again returns to the portrait strip.
+     */
+    public void togglePortraitFullscreen() {
+        Video video = PlaybackPresenter.instance(this).getVideo();
+        if (video != null && video.isShorts) {
+            return;
+        }
+        mPortraitFullscreen = !mPortraitFullscreen;
+        if (mPortraitFullscreen) {
+            stopOrientationWatch();
+            mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+            setRequestedOrientation(mForcedOrientation);
+        } else {
+            mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+            applyOrientationForCurrentVideo();
+        }
+        if (mMobileFragment != null) {
+            mMobileFragment.applyMobileLayout();
+        }
+    }
+
     /**
      * Full-screen button (#46, Modern player styles): force landscape from portrait, or portrait
      * from landscape. Once the phone is physically turned to match, rotation goes back to the
@@ -175,6 +275,16 @@ public class MobilePlaybackActivity extends PlaybackActivity {
      * until it's pressed again.
      */
     public void toggleFullscreen() {
+        if (mPortraitFullscreen) {
+            mPortraitFullscreen = false;
+            mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+            setRequestedOrientation(mForcedOrientation);
+            watchForMatchingOrientation();
+            if (mMobileFragment != null) {
+                mMobileFragment.applyMobileLayout();
+            }
+            return;
+        }
         boolean portrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
         mForcedOrientation = portrait
                 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -289,7 +399,7 @@ public class MobilePlaybackActivity extends PlaybackActivity {
     protected void onResume() {
         super.onResume();
         reapplyFullscreen();
-        if (mForcedOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+        if (!mPortraitFullscreen && mForcedOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
             watchForMatchingOrientation();
         }
     }
@@ -299,8 +409,13 @@ public class MobilePlaybackActivity extends PlaybackActivity {
 
         if (video != null && video.isShorts) {
             // Shorts are 9:16 — lock to portrait so they fill the screen.
+            mPortraitFullscreen = false;
             stopOrientationWatch();
             mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        } else if (mPortraitFullscreen) {
+            stopOrientationWatch();
+            mForcedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         } else {
             // Regular videos rotate freely: landscape = full-screen, upright = 16:9 strip with

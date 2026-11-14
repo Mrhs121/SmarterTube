@@ -17,6 +17,7 @@ public class TextureViewWrapper implements SurfaceWrapper {
     private int mState = SURFACE_NOT_CREATED;
     private final TextureView mVideoSurface;
     private SurfaceHolder.Callback mMediaPlaybackCallback;
+    private Surface mSurface;
 
     @SuppressLint("WrongConstant")
     public TextureViewWrapper(Context context, ViewGroup root) {
@@ -25,25 +26,34 @@ public class TextureViewWrapper implements SurfaceWrapper {
         mVideoSurface.setSurfaceTextureListener(new SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                if (mMediaPlaybackCallback != null) {
-                    mMediaPlaybackCallback.surfaceCreated(new TextureViewSurfaceHolder(new Surface(surface)));
+                if (mSurface != null) {
+                    mSurface.release();
                 }
+                mSurface = new Surface(surface);
                 mState = SURFACE_CREATED;
+                if (mMediaPlaybackCallback != null) {
+                    mMediaPlaybackCallback.surfaceCreated(new TextureViewSurfaceHolder(mSurface));
+                }
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-                if (mMediaPlaybackCallback != null) {
-                    mMediaPlaybackCallback.surfaceChanged(new TextureViewSurfaceHolder(new Surface(surface)), 4, width, height);
+                if (mMediaPlaybackCallback != null && mSurface != null) {
+                    mMediaPlaybackCallback.surfaceChanged(new TextureViewSurfaceHolder(mSurface), 4, width, height);
                 }
             }
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                if (mMediaPlaybackCallback != null) {
-                    mMediaPlaybackCallback.surfaceDestroyed(new TextureViewSurfaceHolder(new Surface(surface)));
-                }
+                Surface destroyedSurface = mSurface;
+                mSurface = null;
                 mState = SURFACE_NOT_CREATED;
+                if (mMediaPlaybackCallback != null && destroyedSurface != null) {
+                    mMediaPlaybackCallback.surfaceDestroyed(new TextureViewSurfaceHolder(destroyedSurface));
+                }
+                if (destroyedSurface != null) {
+                    destroyedSurface.release();
+                }
 
                 return true;
             }
@@ -63,7 +73,12 @@ public class TextureViewWrapper implements SurfaceWrapper {
 
         if (callback != null) {
             if (mState == SURFACE_CREATED) {
-                mMediaPlaybackCallback.surfaceCreated(new TextureViewSurfaceHolder(new Surface(mVideoSurface.getSurfaceTexture())));
+                if (mSurface == null && mVideoSurface.getSurfaceTexture() != null) {
+                    mSurface = new Surface(mVideoSurface.getSurfaceTexture());
+                }
+                if (mSurface != null) {
+                    mMediaPlaybackCallback.surfaceCreated(new TextureViewSurfaceHolder(mSurface));
+                }
             }
         }
     }

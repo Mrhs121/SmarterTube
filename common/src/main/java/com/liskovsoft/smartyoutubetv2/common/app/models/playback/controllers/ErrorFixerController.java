@@ -56,30 +56,10 @@ public class ErrorFixerController extends BasePlayerController implements OnLong
             disableSubtitles();
             mVideoLoaderController.reloadVideo();
         } else if (isOfflineVideo() && !mBufferingDetector.isPlayable()) {
-            int requiredEngine = PlayerTweaksData.PLAYER_DATA_SOURCE_OKHTTP;
-            int customDns = PlayerTweaksData.DNS_TYPE_GOOGLE;
-            boolean isCustomEngineEnabled = getPlayerTweaksData().getPlayerDataSource() == requiredEngine;
-            boolean isCustomDnsEnabled = getPlayerTweaksData().getPreferredDnsType() == customDns;
-            boolean isCustomDnsActive = isCustomEngineEnabled && isCustomDnsEnabled;
-            if (getPlayer().getPositionMs() == 0 && !isCustomDnsActive && !getPlayerTweaksData().isNetworkErrorFixingDisabled()) {
-                // Exclude possible PoToken errors. Upon resume there's no 60 sec PoToken attestation window, so a resumed video fails instantly.
-                // Wrong DNS resolving could cause hanging at start
-                // Do switch to only engine that respects custom DNS settings
-                MessageHelpers.showLongMessage(getContext(), "Fixing incorrect DNS resolution. App restart needed...");
-                getPlayerTweaksData().setPlayerDataSource(requiredEngine);
-                getPlayerTweaksData().setPreferredDnsType(customDns);
-                if (!isCustomDnsEnabled) {
-                    // Restart app to reinit OkHttp internal objects
-                    Utils.restartTheApp(getContext());
-                } else {
-                    mVideoLoaderController.restartEngine();
-                }
-            } else {
-                // Also, some clients like ANDROID_REEL may just hang at start
-                MessageHelpers.showLongMessage(getContext(), "Fixing stalled client...");
-                YouTubeServiceManager.instance().switchNextClientNow();
-                mVideoLoaderController.reloadVideo();
-            }
+            // Do not force-switch player data source/DNS and trigger ProcessPhoenix app restarts
+            // when a video fails or buffers at start (e.g. proxy/VPN or IPv6 hiccups cause restart loops).
+            YouTubeServiceManager.instance().switchNextClientNow();
+            mVideoLoaderController.reloadVideo();
         } else {
             // NOTE: The bug. Avoid calling reloadVideo() after lowering the quality.
             // This will change current format to 'Disabled'. Do restartEngine() instead.

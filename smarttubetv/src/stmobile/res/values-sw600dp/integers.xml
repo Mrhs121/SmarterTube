@@ -2,4 +2,5 @@
 <!-- Tablet (smallest width >= 600dp), portrait. 3-column video grids. -->
 <resources>
     <integer name="mobile_grid_span">3</integer>
+    <integer name="mobile_home_span">2</integer>
 </resources>

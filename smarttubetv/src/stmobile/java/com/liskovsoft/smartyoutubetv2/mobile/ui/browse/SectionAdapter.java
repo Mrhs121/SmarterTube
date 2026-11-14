@@ -71,11 +71,12 @@ class SectionAdapter extends RecyclerView.Adapter<SectionAdapter.ViewHolder> {
     }
 
     int indexOf(BrowseSection section) {
-        if (section == null) {
-            return -1;
-        }
+        return section != null ? indexOfId(section.getId()) : -1;
+    }
+
+    int indexOfId(int sectionId) {
         for (int i = 0; i < mSections.size(); i++) {
-            if (mSections.get(i).getId() == section.getId()) {
+            if (mSections.get(i).getId() == sectionId) {
                 return i;
             }
         }

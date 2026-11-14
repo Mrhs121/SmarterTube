@@ -3,7 +3,9 @@ package com.liskovsoft.smartyoutubetv2.mobile.ui.browse;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
@@ -11,6 +13,7 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -24,9 +27,11 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.bumptech.glide.Glide;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
 import com.liskovsoft.mediaserviceinterfaces.oauth.Account;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.BrowseSection;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.SettingsGroup;
@@ -63,16 +68,24 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
     private View mEmptyContainer;
     private Button mEmptyButton;
     private TextView mToolbarTitle;
+    private View mToolbarLogo;
     private ImageView mAccountView;
+    private View mHomeChipsScroll;
+    private LinearLayout mHomeChips;
     private SectionAdapter mSectionAdapter;
     private VideoCardAdapter mGridAdapter;
     private ShelfAdapter mShelfAdapter;
+    private HomeFeedAdapter mHomeAdapter;
     private SettingsItemAdapter mSettingsAdapter;
     private boolean mProgressShowing;
     private boolean mSwipeRefreshing;
     private boolean mSectionSelected;
+    private int mCurrentSectionId = -1;
+    private int mLastHomePagedCount = -1;
     private int mGridCardWidth;
     private int mGridSpan;
+    private int mHomeSpan;
+    private int mHomeColWidth;
     private int mShelfCardWidth;
 
     @Nullable
@@ -94,6 +107,9 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
         mEmptyContainer = view.findViewById(R.id.empty_container);
         mEmptyButton = view.findViewById(R.id.empty_button);
         mToolbarTitle = view.findViewById(R.id.toolbar_title);
+        mToolbarLogo = view.findViewById(R.id.toolbar_logo);
+        mHomeChipsScroll = view.findViewById(R.id.home_chips_scroll);
+        mHomeChips = view.findViewById(R.id.home_chips);
 
         view.findViewById(R.id.btn_menu).setOnClickListener(v -> {
             if (mDrawer.isDrawerOpen(GravityCompat.START)) {
@@ -128,12 +144,16 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         mGridSpan = getResources().getInteger(R.integer.mobile_grid_span);
         mGridCardWidth = screenWidth / mGridSpan;
+        mHomeSpan = getResources().getInteger(R.integer.mobile_home_span);
+        mHomeColWidth = computeHomeColWidth(screenWidth, mHomeSpan);
         mShelfCardWidth = (int) (screenWidth * 0.42f);
 
         mSectionAdapter = new SectionAdapter(this::onSectionPicked);
         RecyclerView sectionList = view.findViewById(R.id.section_list);
         sectionList.setLayoutManager(new LinearLayoutManager(getContext()));
         sectionList.setAdapter(mSectionAdapter);
+
+        initBottomNav(view);
 
         // Open the menu with an on-screen right-swipe — the left screen edge belongs to
         // the system Back gesture and must not be used for this. See mSwipeToOpenMenu.
@@ -234,6 +254,8 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
     public void addSection(int index, BrowseSection section) {
         if (mSectionAdapter != null && section != null) {
             mSectionAdapter.add(index, section);
+            rebuildCategoryChips();
+            syncBottomNav();
             // Auto-open a default section so the user lands on videos rather than an empty
             // "pick a section" Home — notably after sign-in, where the section list is
             // rebuilt. Deferred via post() so a presenter-driven selection during the same
@@ -256,6 +278,8 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
     public void removeSection(BrowseSection section) {
         if (mSectionAdapter != null) {
             mSectionAdapter.remove(section);
+            rebuildCategoryChips();
+            syncBottomNav();
         }
     }
 
@@ -264,6 +288,8 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
         if (mSectionAdapter != null) {
             mSectionAdapter.clear();
         }
+        rebuildCategoryChips();
+        syncBottomNav();
         // Section list is being rebuilt — re-arm the default-section auto-open.
         mSectionSelected = false;
     }
@@ -275,11 +301,18 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
         }
         BrowseSection section = mSectionAdapter.getItem(index);
         mSectionSelected = true;
+        mCurrentSectionId = section.getId();
         mSectionAdapter.setSelected(section);
-        if (mToolbarTitle != null) {
-            mToolbarTitle.setText(section.getTitle());
+        boolean isHome = section.getId() == MediaGroup.TYPE_HOME;
+        if (mToolbarLogo != null) {
+            mToolbarLogo.setVisibility(isHome ? View.VISIBLE : View.GONE);
         }
-        setupContentForType(section.getType());
+        if (mToolbarTitle != null) {
+            mToolbarTitle.setText(isHome ? getString(R.string.app_name) : section.getTitle());
+        }
+        rebuildCategoryChips();
+        syncBottomNav();
+        setupContentForSection(section);
         if (mPresenter != null) {
             mPresenter.onSectionFocused(section.getId());
         }
@@ -292,6 +325,8 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
         }
         switch (group.getAction()) {
             case VideoGroup.ACTION_REPLACE:
+                mLastHomePagedCount = -1;
+                if (mHomeAdapter != null) mHomeAdapter.clear();
                 if (mShelfAdapter != null) mShelfAdapter.clear();
                 if (mGridAdapter != null) mGridAdapter.clear();
                 hideEmptyMessage();
@@ -305,18 +340,23 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
             case VideoGroup.ACTION_REMOVE_AUTHOR:
                 if (mGridAdapter != null) mGridAdapter.remove(group.getVideos());
                 if (mShelfAdapter != null) mShelfAdapter.removeVideos(group.getVideos());
+                if (mHomeAdapter != null) mHomeAdapter.removeVideos(group.getVideos());
                 break;
             case VideoGroup.ACTION_SYNC:
                 // Percent-watched refresh (e.g. back from the player): redraw the watched bars.
                 if (mGridAdapter != null) mGridAdapter.sync(group.getVideos());
                 if (mShelfAdapter != null) mShelfAdapter.syncVideos(group.getVideos());
+                if (mHomeAdapter != null) mHomeAdapter.syncVideos(group.getVideos());
                 break;
             default: // ACTION_APPEND / ACTION_PREPEND
                 if (group.isEmpty()) {
                     break;
                 }
                 hideEmptyMessage();
-                if (mShelfAdapter != null) {
+                if (mHomeAdapter != null) {
+                    mHomeAdapter.appendGroup(group);
+                    mContentList.post(this::maybePrefetchMoreHome);
+                } else if (mShelfAdapter != null) {
                     mShelfAdapter.appendGroup(group);
                 } else if (mGridAdapter != null) {
                     // A continuation carries the full cumulative list, so replace.
@@ -332,6 +372,7 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
             return;
         }
         hideEmptyMessage();
+        mHomeAdapter = null;
         mShelfAdapter = null;
         mGridAdapter = null;
         mSettingsAdapter = new SettingsItemAdapter(MobileSettingsRows.build(getActivity(), group.getItems()));
@@ -341,6 +382,7 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
 
     @Override
     public void clearSection(BrowseSection section) {
+        if (mHomeAdapter != null) mHomeAdapter.clear();
         if (mShelfAdapter != null) mShelfAdapter.clear();
         if (mGridAdapter != null) mGridAdapter.clear();
     }
@@ -403,7 +445,8 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
 
     @Override
     public boolean isEmpty() {
-        return (mGridAdapter == null || mGridAdapter.getItemCount() == 0)
+        return (mHomeAdapter == null || mHomeAdapter.getItemCount() == 0)
+                && (mGridAdapter == null || mGridAdapter.getItemCount() == 0)
                 && (mShelfAdapter == null || mShelfAdapter.getItemCount() == 0)
                 && (mSettingsAdapter == null || mSettingsAdapter.getItemCount() == 0);
     }
@@ -416,22 +459,56 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
 
     // ----- helpers -----
 
-    private void setupContentForType(int type) {
+    private int computeHomeColWidth(int screenWidth, int spanCount) {
+        float density = getResources().getDisplayMetrics().density;
+        int outerPad = Math.round(12 * density); // 6dp left + 6dp right on mContentList
+        int perCardPad = Math.round(12 * density); // 6dp start + 6dp end on mobile_home_video_card
+        return Math.max(1, (screenWidth - outerPad) / Math.max(1, spanCount) - perCardPad);
+    }
+
+    private void setupContentForSection(BrowseSection section) {
         hideEmptyMessage();
         mContentList.clearOnScrollListeners();
-        if (type == BrowseSection.TYPE_ROW) {
+        int type = section.getType();
+        float density = getResources().getDisplayMetrics().density;
+        int bottomPad = Math.round(8 * density);
+        if (section.getId() == MediaGroup.TYPE_HOME) {
+            mLastHomePagedCount = -1;
+            int sidePad = Math.round(6 * density);
+            mContentList.setPadding(sidePad, Math.round(4 * density), sidePad, bottomPad);
+            mHomeAdapter = new HomeFeedAdapter(mHomeColWidth, mVideoClick, mVideoLongClick);
+            mShelfAdapter = null;
+            mGridAdapter = null;
+            mSettingsAdapter = null;
+            StaggeredGridLayoutManager lm = new StaggeredGridLayoutManager(
+                    mHomeSpan, StaggeredGridLayoutManager.VERTICAL);
+            lm.setGapStrategy(StaggeredGridLayoutManager.GAP_HANDLING_NONE);
+            mContentList.setLayoutManager(lm);
+            mContentList.setAdapter(mHomeAdapter);
+            mContentList.addOnScrollListener(mHomeScrollListener);
+        } else if (type == BrowseSection.TYPE_ROW) {
+            mContentList.setPadding(0, 0, 0, bottomPad);
             mShelfAdapter = new ShelfAdapter(mShelfCardWidth, mVideoClick, mVideoLongClick,
                     mShelfScrollEnd);
+            mHomeAdapter = null;
             mGridAdapter = null;
             mSettingsAdapter = null;
             mContentList.setLayoutManager(new LinearLayoutManager(getContext()));
             mContentList.setAdapter(mShelfAdapter);
         } else if (type == BrowseSection.TYPE_SETTINGS_GRID) {
+            mContentList.setPadding(0, 0, 0, bottomPad);
             // The adapter is supplied separately via updateSection(SettingsGroup).
+            mHomeAdapter = null;
             mShelfAdapter = null;
             mGridAdapter = null;
         } else {
+            mContentList.setPadding(0, 0, 0, bottomPad);
             mGridAdapter = new VideoCardAdapter(mGridCardWidth, mVideoClick, mVideoLongClick);
+            if (type == BrowseSection.TYPE_SHORTS_GRID) {
+                mGridAdapter.setAdaptiveStyles(true);
+                mGridAdapter.setVerticalShorts(true);
+            }
+            mHomeAdapter = null;
             mShelfAdapter = null;
             mSettingsAdapter = null;
             mContentList.setLayoutManager(new GridLayoutManager(getContext(), mGridSpan));
@@ -442,18 +519,143 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
 
     // Hosting activity declares configChanges="orientation|..." so it is NOT recreated on
     // rotation; re-read the grid span (values-sw600dp-land widens it) and resize cards.
-    // Only the grid section uses a GridLayoutManager; shelves/settings are left as-is.
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
         mGridSpan = getResources().getInteger(R.integer.mobile_grid_span);
-        mGridCardWidth = getResources().getDisplayMetrics().widthPixels / mGridSpan;
+        mGridCardWidth = screenWidth / mGridSpan;
+        mHomeSpan = getResources().getInteger(R.integer.mobile_home_span);
+        mHomeColWidth = computeHomeColWidth(screenWidth, mHomeSpan);
+        mShelfCardWidth = (int) (screenWidth * 0.42f);
+
         if (mContentList != null && mContentList.getLayoutManager() instanceof GridLayoutManager) {
             ((GridLayoutManager) mContentList.getLayoutManager()).setSpanCount(mGridSpan);
+        } else if (mContentList != null
+                && mContentList.getLayoutManager() instanceof StaggeredGridLayoutManager) {
+            ((StaggeredGridLayoutManager) mContentList.getLayoutManager()).setSpanCount(mHomeSpan);
         }
         if (mGridAdapter != null) {
             mGridAdapter.setCardWidth(mGridCardWidth);
         }
+        if (mHomeAdapter != null) {
+            mHomeAdapter.setColumnWidth(mHomeColWidth);
+        }
+    }
+
+    private void initBottomNav(View root) {
+        bindNavTab(root, R.id.nav_home, MediaGroup.TYPE_HOME);
+        bindNavTab(root, R.id.nav_shorts, MediaGroup.TYPE_SHORTS);
+        bindNavTab(root, R.id.nav_subscriptions, MediaGroup.TYPE_SUBSCRIPTIONS);
+        bindNavTab(root, R.id.nav_playlists, MediaGroup.TYPE_USER_PLAYLISTS);
+        bindNavTab(root, R.id.nav_history, MediaGroup.TYPE_HISTORY);
+        syncBottomNav();
+    }
+
+    private void bindNavTab(View root, int tabId, int sectionId) {
+        View tab = root.findViewById(tabId);
+        if (tab == null) {
+            return;
+        }
+        tab.setOnClickListener(v -> {
+            if (mSectionAdapter == null) {
+                return;
+            }
+            int idx = mSectionAdapter.indexOfId(sectionId);
+            if (idx >= 0) {
+                selectSection(idx, false);
+            }
+        });
+    }
+
+    private void syncBottomNav() {
+        View root = getView();
+        if (root == null) {
+            return;
+        }
+        syncNavTab(root, R.id.nav_home, R.id.nav_home_icon, R.id.nav_home_label, MediaGroup.TYPE_HOME);
+        syncNavTab(root, R.id.nav_shorts, R.id.nav_shorts_icon, R.id.nav_shorts_label, MediaGroup.TYPE_SHORTS);
+        syncNavTab(root, R.id.nav_subscriptions, R.id.nav_subscriptions_icon, R.id.nav_subscriptions_label, MediaGroup.TYPE_SUBSCRIPTIONS);
+        syncNavTab(root, R.id.nav_playlists, R.id.nav_playlists_icon, R.id.nav_playlists_label, MediaGroup.TYPE_USER_PLAYLISTS);
+        syncNavTab(root, R.id.nav_history, R.id.nav_history_icon, R.id.nav_history_label, MediaGroup.TYPE_HISTORY);
+    }
+
+    private void syncNavTab(View root, int tabId, int iconId, int labelId, int sectionId) {
+        View tab = root.findViewById(tabId);
+        if (tab == null) {
+            return;
+        }
+        boolean available = mSectionAdapter != null && mSectionAdapter.indexOfId(sectionId) >= 0;
+        tab.setVisibility(available ? View.VISIBLE : View.GONE);
+        if (!available) {
+            return;
+        }
+        boolean selected = sectionId == mCurrentSectionId;
+        int color = ContextCompat.getColor(requireContext(),
+                selected ? R.color.mobile_text_primary : R.color.mobile_text_secondary);
+        ImageView icon = root.findViewById(iconId);
+        if (icon != null) {
+            ImageViewCompat.setImageTintList(icon, ColorStateList.valueOf(color));
+        }
+        TextView label = root.findViewById(labelId);
+        if (label != null) {
+            label.setTextColor(color);
+            label.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
+        }
+    }
+
+    private void rebuildCategoryChips() {
+        if (mHomeChips == null || mHomeChipsScroll == null || mSectionAdapter == null) {
+            return;
+        }
+        mHomeChips.removeAllViews();
+        int count = 0;
+        float density = getResources().getDisplayMetrics().density;
+        int padH = Math.round(14 * density);
+        int padV = Math.round(7 * density);
+        // Put Home first, then content sections (skip utility-only drawer entries like Notifications/Queue).
+        java.util.List<Integer> ordered = new java.util.ArrayList<>(mSectionAdapter.getItemCount());
+        int homeIdx = mSectionAdapter.indexOfId(MediaGroup.TYPE_HOME);
+        if (homeIdx >= 0) {
+            ordered.add(homeIdx);
+        }
+        for (int i = 0; i < mSectionAdapter.getItemCount(); i++) {
+            if (i == homeIdx) {
+                continue;
+            }
+            BrowseSection section = mSectionAdapter.getItem(i);
+            if (section == null || section.getType() == BrowseSection.TYPE_SETTINGS_GRID
+                    || section.getTitle() == null || section.getTitle().isEmpty()) {
+                continue;
+            }
+            int id = section.getId();
+            if (id == MediaGroup.TYPE_NOTIFICATIONS || id == MediaGroup.TYPE_PLAYBACK_QUEUE
+                    || id == MediaGroup.TYPE_BLOCKED_CHANNELS) {
+                continue;
+            }
+            ordered.add(i);
+        }
+        for (int sectionIndex : ordered) {
+            BrowseSection section = mSectionAdapter.getItem(sectionIndex);
+            boolean selected = section.getId() == mCurrentSectionId;
+            TextView chip = new TextView(requireContext());
+            chip.setText(section.getTitle());
+            chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            chip.setSingleLine(true);
+            chip.setBackgroundResource(R.drawable.bg_sort_chip);
+            chip.setPadding(padH, padV, padH, padV);
+            chip.setSelected(selected);
+            chip.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
+            chip.setTextColor(ContextCompat.getColor(requireContext(),
+                    selected ? R.color.mobile_background : R.color.mobile_text_primary));
+            chip.setOnClickListener(v -> selectSection(sectionIndex, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd(Math.round(8 * density));
+            mHomeChips.addView(chip, lp);
+            count++;
+        }
+        mHomeChipsScroll.setVisibility(count > 1 ? View.VISIBLE : View.GONE);
     }
 
     private final VideoCardAdapter.OnVideoAction mVideoClick = video -> {
@@ -499,6 +701,51 @@ public class MobileBrowseFragment extends Fragment implements BrowseView, MediaS
             if (lastVisible >= mGridAdapter.getItemCount() - 4) {
                 Video last = mGridAdapter.getLast();
                 if (last != null && mPresenter != null) {
+                    mPresenter.onScrollEnd(last);
+                }
+            }
+        }
+    };
+
+    private void maybePrefetchMoreHome() {
+        if (mHomeAdapter == null || mContentList == null || mPresenter == null || mProgressShowing) {
+            return;
+        }
+        int count = mHomeAdapter.getItemCount();
+        if (count == 0 || count == mLastHomePagedCount || count >= 12) {
+            return;
+        }
+        if (!mContentList.canScrollVertically(1)) {
+            Video last = mHomeAdapter.getLastMainVideo();
+            if (last != null) {
+                mLastHomePagedCount = count;
+                mPresenter.onScrollEnd(last);
+            }
+        }
+    }
+
+    private final RecyclerView.OnScrollListener mHomeScrollListener = new RecyclerView.OnScrollListener() {
+        @Override
+        public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+            if (dy <= 0 || mProgressShowing || mHomeAdapter == null) {
+                return;
+            }
+            RecyclerView.LayoutManager lm = recyclerView.getLayoutManager();
+            if (!(lm instanceof StaggeredGridLayoutManager)) {
+                return;
+            }
+            int[] positions = ((StaggeredGridLayoutManager) lm).findLastVisibleItemPositions(null);
+            int lastVisible = -1;
+            for (int pos : positions) {
+                if (pos > lastVisible) {
+                    lastVisible = pos;
+                }
+            }
+            int count = mHomeAdapter.getItemCount();
+            if (count > 0 && count != mLastHomePagedCount && lastVisible >= count - 6) {
+                Video last = mHomeAdapter.getLastMainVideo();
+                if (last != null && mPresenter != null) {
+                    mLastHomePagedCount = count;
                     mPresenter.onScrollEnd(last);
                 }
             }

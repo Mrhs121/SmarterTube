@@ -79,14 +79,38 @@ public class ShelfAdapter extends RecyclerView.Adapter<ShelfAdapter.ViewHolder> 
             }
             mGroups.set(idx, group);
         } else {
-            VideoCardAdapter adapter = new VideoCardAdapter(mCardWidth, mClick, mLongClick);
-            adapter.setVideos(group.getVideos());
+            List<Video> videos = group.getVideos();
+            boolean isShorts = isShortsGroup(videos);
+            int width = isShorts ? Math.max(1, (int) (mCardWidth * 0.72f)) : mCardWidth;
+            VideoCardAdapter adapter = new VideoCardAdapter(width, mClick, mLongClick);
+            if (isShorts) {
+                adapter.setAdaptiveStyles(true);
+                adapter.setVerticalShorts(true);
+            }
+            adapter.setVideos(videos);
             mIds.add(group.getId());
             mTitles.add(group.getTitle() != null ? group.getTitle() : "");
             mAdapters.add(adapter);
             mGroups.add(group);
             notifyItemInserted(mAdapters.size() - 1);
         }
+    }
+
+    static boolean isShortsGroup(List<Video> videos) {
+        if (videos == null || videos.isEmpty()) {
+            return false;
+        }
+        int checked = 0;
+        for (Video v : videos) {
+            if (v == null) {
+                continue;
+            }
+            checked++;
+            if (!v.isShorts) {
+                return false;
+            }
+        }
+        return checked > 0;
     }
 
     public void removeVideos(List<Video> videos) {
