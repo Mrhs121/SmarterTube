@@ -17,6 +17,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.base.ImmersiveBars;
+import com.liskovsoft.smartyoutubetv2.mobile.ui.base.MobileActivity;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.liskovsoft.smartyoutubetv2.tv.ui.playback.PlaybackActivity;
 
@@ -46,6 +47,24 @@ public class MobilePlaybackActivity extends PlaybackActivity {
     private static final long ROTATION_SETTLE_MS = 600;
     private static final long REHIDE_DELAY_MS = 300;
     private final Runnable mReassertFullscreen = this::reassertFullscreen;
+
+    @Override
+    protected void initTheme() {
+        super.initTheme();
+        // Preserve upstream player color attributes while keeping windowIsTranslucent for drag reveal.
+        getTheme().applyStyle(R.style.Theme_SmarterTube_Mobile_PlayerTranslucentOverlay, true);
+    }
+
+    @Override
+    public void setRequestedOrientation(int requestedOrientation) {
+        if (android.os.Build.VERSION.SDK_INT == android.os.Build.VERSION_CODES.O) {
+            return;
+        }
+        try {
+            super.setRequestedOrientation(requestedOrientation);
+        } catch (IllegalStateException ignored) {
+        }
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -126,6 +145,7 @@ public class MobilePlaybackActivity extends PlaybackActivity {
      * Minimizes the live player into the floating bottom-right mini-player without stopping playback.
      */
     public void minimizeToMiniPlayer() {
+        MobileActivity.clearUnderlayBlur();
         if (mMinimizing || isInPipMode() || mMobileFragment == null) {
             return;
         }
@@ -144,6 +164,7 @@ public class MobilePlaybackActivity extends PlaybackActivity {
 
     @Override
     public void finishReally() {
+        MobileActivity.clearUnderlayBlur();
         super.finishReally();
         if (!mMinimizing && !isInPipMode()) {
             applyReturnTransition();

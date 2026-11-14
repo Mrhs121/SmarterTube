@@ -16,6 +16,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.TextureView;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
@@ -69,6 +70,7 @@ import com.liskovsoft.smartyoutubetv2.mobile.notifications.MediaNotificationServ
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.AppDialogUtil;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.base.CutoutGuard;
+import com.liskovsoft.smartyoutubetv2.mobile.ui.base.MobileActivity;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.base.TextLinks;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.browse.MobileSettingsActivity;
 import com.liskovsoft.smartyoutubetv2.mobile.ui.prefs.MobilePlayerStylePrefs;
@@ -1113,44 +1115,73 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         return true;
     }
 
-    private float mStripDownX;
-    private float mStripDownY;
+    private float mStripDownRawX;
+    private float mStripDownRawY;
     private boolean mStripDownInVideo;
     private boolean mStripSwipingDown;
+    private float mStripDragProgress;
+    @Nullable
+    private VelocityTracker mStripVelocityTracker;
 
     /**
      * Watches touches on the non-fullscreen 16:9 strip:
      * - Swipe UP (Modern styles) enters fullscreen.
-     * - Swipe DOWN interactively fades out below-video content, shrinks the video frame toward
-     *   the bottom-right mini-player target, and seamlessly hands off into {@link MobileMiniPlayer}.
+     * - Swipe DOWN interactively fades out below-video content, reveals Home from blurred to sharp
+     *   by mid-drag, follows the finger 1:1 down to the bottom-right mini-player target, and
+     *   hands off seamlessly into {@link MobileMiniPlayer}.
      */
     private boolean handleStripVerticalSwipe(MotionEvent event, View playerView) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                mStripDownX = event.getX();
-                mStripDownY = event.getY();
+                mStripDownRawX = event.getRawX();
+                mStripDownRawY = event.getRawY();
                 mStripSwipingDown = false;
+                mStripDragProgress = 0f;
                 mStripDownInVideo = !isInPipMode()
                         && event.getY() <= playerView.getBottom()
                         && !hitsStripSeekBar(event.getRawX(), event.getRawY(), playerView);
+                recycleStripVelocityTracker();
+                if (mStripDownInVideo) {
+                    mStripVelocityTracker = VelocityTracker.obtain();
+                    mStripVelocityTracker.addMovement(event);
+                }
                 return false;
 
             case MotionEvent.ACTION_MOVE: {
                 if (!mStripDownInVideo) {
                     return false;
                 }
-                float dx = event.getX() - mStripDownX;
-                float dy = event.getY() - mStripDownY;
+                if (mStripVelocityTracker != null) {
+                    mStripVelocityTracker.addMovement(event);
+                }
+                float dx = event.getRawX() - mStripDownRawX;
+                float dy = event.getRawY() - mStripDownRawY;
                 float density = getResources().getDisplayMetrics().density;
                 int slop = ViewConfiguration.get(requireContext()).getScaledTouchSlop() * 2;
                 if (!mStripSwipingDown && dy > slop && dy > 1.8f * Math.abs(dx)) {
                     mStripSwipingDown = true;
                     cancelStripDownstreamTouches(event);
+                    // Pre-blur the underlying Home window before the black backdrop starts thinning.
+                    MobileActivity.setUnderlayBlurFraction(1f);
                 }
                 if (mStripSwipingDown) {
-                    float maxDragPx = 180f * density;
-                    float progress = PlaybackNavigationRules.computeStripDragProgress(dy, maxDragPx);
-                    applyStripDragVisuals(playerView, progress);
+                    View rootView = playerView.getRootView();
+                    int hostW = rootView != null && rootView.getWidth() > 0
+                            ? rootView.getWidth() : getResources().getDisplayMetrics().widthPixels;
+                    int hostH = rootView != null && rootView.getHeight() > 0
+                            ? rootView.getHeight() : getResources().getDisplayMetrics().heightPixels;
+                    float miniW = PlaybackNavigationRules.computeMiniCardWidthPx(hostW, density);
+                    float miniH = miniW * 9f / 16f;
+                    float destLeft = hostW - 12f * density - miniW;
+                    float destTop = hostH - 68f * density - miniH;
+                    int[] loc = new int[2];
+                    playerView.getLocationOnScreen(loc);
+                    float restLeft = loc[0] - playerView.getTranslationX();
+                    float restTop = loc[1] - playerView.getTranslationY();
+                    float maxDragPx = Math.max(180f * density, destTop - restTop);
+                    mStripDragProgress = PlaybackNavigationRules.computeStripDragProgress(dy, maxDragPx);
+                    applyStripDragVisuals(
+                            playerView, mStripDragProgress, destLeft, destTop, miniW, miniH, restLeft, restTop);
                     return true;
                 }
                 return false;
@@ -1159,17 +1190,30 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             case MotionEvent.ACTION_UP: {
                 boolean candidate = mStripDownInVideo;
                 boolean swipingDown = mStripSwipingDown;
+                float progress = mStripDragProgress;
+                float vy = 0f;
+                if (mStripVelocityTracker != null) {
+                    mStripVelocityTracker.addMovement(event);
+                    mStripVelocityTracker.computeCurrentVelocity(1000);
+                    vy = mStripVelocityTracker.getYVelocity();
+                }
+                recycleStripVelocityTracker();
                 mStripDownInVideo = false;
                 mStripSwipingDown = false;
+                mStripDragProgress = 0f;
                 if (!candidate) {
                     return false;
                 }
-                float dy = event.getY() - mStripDownY;
-                float dx = event.getX() - mStripDownX;
-                float minDy = 48 * getResources().getDisplayMetrics().density;
+                float dy = event.getRawY() - mStripDownRawY;
+                float dx = event.getRawX() - mStripDownRawX;
+                float density = getResources().getDisplayMetrics().density;
+                float minDy = 48f * density;
                 int direction = PlaybackNavigationRules.classifyStripSwipe(dx, dy, minDy);
-                if (direction == PlaybackNavigationRules.STRIP_SWIPE_DOWN
-                        && getActivity() instanceof MobilePlaybackActivity) {
+                boolean shouldCommit = direction == PlaybackNavigationRules.STRIP_SWIPE_DOWN
+                        || (swipingDown && PlaybackNavigationRules.shouldCommitStripMinimize(
+                                progress, dy, vy, minDy, 750f * density));
+                if (shouldCommit && getActivity() instanceof MobilePlaybackActivity) {
+                    MobileActivity.clearUnderlayBlur();
                     mPendingEnterBounds = captureViewScreenBounds(playerView);
                     ((MobilePlaybackActivity) getActivity()).minimizeToMiniPlayer();
                     return true;
@@ -1188,7 +1232,9 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             }
 
             case MotionEvent.ACTION_CANCEL:
+                recycleStripVelocityTracker();
                 mStripDownInVideo = false;
+                mStripDragProgress = 0f;
                 boolean wasSwiping = mStripSwipingDown;
                 mStripSwipingDown = false;
                 if (wasSwiping || playerView.getTranslationY() != 0f || playerView.getScaleX() != 1f) {
@@ -1201,13 +1247,37 @@ public class MobilePlaybackFragment extends PlaybackFragment {
         }
     }
 
-    private void applyStripDragVisuals(@NonNull View playerView, float progress) {
+    private void recycleStripVelocityTracker() {
+        if (mStripVelocityTracker != null) {
+            mStripVelocityTracker.recycle();
+            mStripVelocityTracker = null;
+        }
+    }
+
+    private void applyStripDragVisuals(
+            @NonNull View playerView,
+            float progress,
+            float destLeft,
+            float destTop,
+            float miniW,
+            float miniH,
+            float restLeft,
+            float restTop) {
         if (playerView.getWidth() <= 0 || playerView.getHeight() <= 0) {
             return;
         }
         float density = getResources().getDisplayMetrics().density;
         float panelAlpha = PlaybackNavigationRules.computeStripPanelAlpha(progress);
+        float backdropAlpha = PlaybackNavigationRules.computeStripBackdropAlpha(progress);
+        float blurFraction = PlaybackNavigationRules.computeStripUnderlayBlur(progress);
         float chromeAlpha = Math.max(0f, 1f - progress * 2.5f);
+
+        View backdrop = getActivity() != null ? getActivity().findViewById(R.id.mobile_playback_backdrop) : null;
+        if (backdrop != null) {
+            backdrop.animate().cancel();
+            backdrop.setAlpha(backdropAlpha);
+        }
+        MobileActivity.setUnderlayBlurFraction(blurFraction);
 
         if (mPanel != null) {
             mPanel.animate().cancel();
@@ -1224,27 +1294,12 @@ public class MobilePlaybackFragment extends PlaybackFragment {
             mShortsNavBar.setAlpha(panelAlpha);
         }
 
-        int screenW = getResources().getDisplayMetrics().widthPixels;
-        int screenH = getResources().getDisplayMetrics().heightPixels;
-        float miniW = PlaybackNavigationRules.computeMiniCardWidthPx(screenW, density);
-        float miniH = miniW * 9f / 16f;
-        float destLeft = screenW - 12f * density - miniW;
-        float destTop = screenH - 68f * density - miniH;
-
         float stripW = playerView.getWidth();
         float stripH = playerView.getHeight();
-        float currentTx = playerView.getTranslationX();
-        float currentTy = playerView.getTranslationY();
-        int[] loc = new int[2];
-        playerView.getLocationOnScreen(loc);
-        float restLeft = loc[0] - currentTx;
-        float restTop = loc[1] - currentTy;
-
-        float visualT = progress * 0.45f;
-        float targetScaleX = PlaybackNavigationRules.lerp(1f, miniW / stripW, visualT);
-        float targetScaleY = PlaybackNavigationRules.lerp(1f, miniH / stripH, visualT);
-        float targetTx = PlaybackNavigationRules.lerp(0f, destLeft - restLeft, visualT);
-        float targetTy = PlaybackNavigationRules.lerp(0f, destTop - restTop, visualT);
+        float targetScaleX = PlaybackNavigationRules.lerp(1f, miniW / stripW, progress);
+        float targetScaleY = PlaybackNavigationRules.lerp(1f, miniH / stripH, progress);
+        float targetTx = PlaybackNavigationRules.lerp(0f, destLeft - restLeft, progress);
+        float targetTy = PlaybackNavigationRules.lerp(0f, destTop - restTop, progress);
 
         playerView.animate().cancel();
         playerView.setPivotX(0f);
@@ -1264,8 +1319,19 @@ public class MobilePlaybackFragment extends PlaybackFragment {
                 .translationY(0f)
                 .setDuration(180)
                 .setInterpolator(new DecelerateInterpolator())
-                .withEndAction(() -> setRoundedClip(playerView, 0f))
+                .withEndAction(() -> {
+                    setRoundedClip(playerView, 0f);
+                    MobileActivity.clearUnderlayBlur();
+                })
                 .start();
+        View backdrop = getActivity() != null ? getActivity().findViewById(R.id.mobile_playback_backdrop) : null;
+        if (backdrop != null) {
+            backdrop.animate()
+                    .alpha(1f)
+                    .setDuration(180)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        }
         if (mPanel != null) {
             mPanel.animate()
                     .alpha(1f)
@@ -1284,6 +1350,12 @@ public class MobilePlaybackFragment extends PlaybackFragment {
     }
 
     private void resetStripDragVisuals(@Nullable View playerView) {
+        MobileActivity.clearUnderlayBlur();
+        View backdrop = getActivity() != null ? getActivity().findViewById(R.id.mobile_playback_backdrop) : null;
+        if (backdrop != null) {
+            backdrop.animate().cancel();
+            backdrop.setAlpha(1f);
+        }
         if (playerView != null) {
             playerView.animate().cancel();
             playerView.setScaleX(1f);

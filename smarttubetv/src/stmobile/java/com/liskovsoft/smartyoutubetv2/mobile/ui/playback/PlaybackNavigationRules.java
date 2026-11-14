@@ -81,7 +81,35 @@ final class PlaybackNavigationRules {
 
     /** Fades out below-video content earlier than the video shrink so only the video box stays visible. */
     static float computeStripPanelAlpha(float dragProgress) {
-        return Math.max(0f, Math.min(1f, 1f - dragProgress * 1.6f));
+        return Math.max(0f, Math.min(1f, 1f - dragProgress * 2.2f));
+    }
+
+    /** Fades out the black window backdrop so the Home feed underneath becomes clear around mid-drag. */
+    static float computeStripBackdropAlpha(float dragProgress) {
+        return Math.max(0f, Math.min(1f, 1f - dragProgress / 0.55f));
+    }
+
+    /** Underlay blur intensity [0..1] during strip drag: blurred early, completely sharp by mid-drag (0.55). */
+    static float computeStripUnderlayBlur(float dragProgress) {
+        if (dragProgress <= 0f) {
+            return 0f;
+        }
+        return Math.max(0f, Math.min(1f, 1f - dragProgress / 0.55f));
+    }
+
+    /** Whether releasing a downward strip drag should commit into the floating mini-player. */
+    static boolean shouldCommitStripMinimize(
+            float dragProgress,
+            float dyPx,
+            float velocityYPx,
+            float minDistancePx,
+            float minVelocityPx) {
+        if (dyPx <= 0f) {
+            return false;
+        }
+        return dragProgress >= 0.35f
+                || dyPx >= minDistancePx
+                || (velocityYPx >= minVelocityPx && dyPx >= minDistancePx * 0.4f);
     }
 
     static float lerp(float start, float end, float fraction) {

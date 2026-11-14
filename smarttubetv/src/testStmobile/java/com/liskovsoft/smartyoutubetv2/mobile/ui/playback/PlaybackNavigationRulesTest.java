@@ -75,7 +75,19 @@ public class PlaybackNavigationRulesTest {
         assertEquals(1f, PlaybackNavigationRules.computeStripDragProgress(450f, 300f), 0.001f);
 
         assertEquals(1f, PlaybackNavigationRules.computeStripPanelAlpha(0f), 0.001f);
-        assertTrue(PlaybackNavigationRules.computeStripPanelAlpha(0.5f) < 0.25f);
-        assertEquals(0f, PlaybackNavigationRules.computeStripPanelAlpha(0.65f), 0.001f);
+        assertTrue(PlaybackNavigationRules.computeStripPanelAlpha(0.35f) < 0.3f);
+        assertEquals(0f, PlaybackNavigationRules.computeStripPanelAlpha(0.55f), 0.001f);
+
+        // Backdrop and Home blur fade to 0 (completely clear & sharp) right around mid-drag (0.55).
+        assertEquals(1f, PlaybackNavigationRules.computeStripBackdropAlpha(0f), 0.001f);
+        assertTrue(PlaybackNavigationRules.computeStripBackdropAlpha(0.275f) > 0.45f);
+        assertEquals(0f, PlaybackNavigationRules.computeStripBackdropAlpha(0.55f), 0.001f);
+        assertEquals(0f, PlaybackNavigationRules.computeStripUnderlayBlur(0f), 0.001f);
+        assertTrue(PlaybackNavigationRules.computeStripUnderlayBlur(0.2f) > 0.5f);
+        assertEquals(0f, PlaybackNavigationRules.computeStripUnderlayBlur(0.55f), 0.001f);
+
+        assertFalse(PlaybackNavigationRules.shouldCommitStripMinimize(0.2f, 80f, 100f, 144f, 1500f));
+        assertTrue(PlaybackNavigationRules.shouldCommitStripMinimize(0.4f, 120f, 50f, 144f, 1500f));
+        assertTrue(PlaybackNavigationRules.shouldCommitStripMinimize(0.15f, 80f, 2000f, 144f, 1500f));
     }
 }

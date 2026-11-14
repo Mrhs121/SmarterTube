@@ -16,7 +16,18 @@
     android:id="@+id/mobile_playback_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    android:background="@android:color/transparent">
+
+    <!-- Opaque player backdrop at rest; fades out by mid-drag so Home is revealed smoothly underneath. -->
+    <View
+        android:id="@+id/mobile_playback_backdrop"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@android:color/black"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <fragment
         android:id="@+id/playback_controls_fragment"

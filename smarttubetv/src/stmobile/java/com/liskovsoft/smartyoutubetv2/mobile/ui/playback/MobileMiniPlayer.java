@@ -486,12 +486,14 @@ public final class MobileMiniPlayer {
                 card.setTranslationY(startTy);
                 card.setAlpha(1f);
 
+                long distPx = Math.round(Math.max(Math.abs(startTx), Math.abs(startTy)));
+                long duration = Math.max(45L, Math.min(SHARED_TRANSITION_MS, Math.round(distPx * 0.45f)));
                 card.animate()
                         .scaleX(1f)
                         .scaleY(1f)
                         .translationX(0f)
                         .translationY(0f)
-                        .setDuration(SHARED_TRANSITION_MS)
+                        .setDuration(duration)
                         .setInterpolator(new FastOutSlowInInterpolator())
                         .start();
                 return true;

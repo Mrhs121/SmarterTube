@@ -4,8 +4,14 @@ import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
+import android.view.View;
+
+import java.lang.ref.WeakReference;
 
 import androidx.annotation.Nullable;
 
@@ -29,6 +35,7 @@ import com.liskovsoft.smartyoutubetv2.tv.R;
  * force the corresponding bit.
  */
 public abstract class MobileActivity extends MotherActivity {
+    private static WeakReference<View> sUnderlayContentRef;
     @Override
     protected void attachBaseContext(Context newBase) {
         super.attachBaseContext(applyThemeOverride(newBase));
@@ -104,6 +111,36 @@ public abstract class MobileActivity extends MotherActivity {
         if (registersInViewStack()) {
             getViewManager().addTop(this);
         }
+        if (supportsMiniPlayerOverlay()) {
+            sUnderlayContentRef = new WeakReference<>(findViewById(android.R.id.content));
+            clearUnderlayBlur();
+        }
+    }
+
+    /**
+     * Applies or clears a real-time Gaussian blur on the underlying browse activity while the
+     * player strip is dragged toward the mini-player (Android 12+).
+     */
+    public static void setUnderlayBlurFraction(float fraction) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return;
+        }
+        View target = sUnderlayContentRef != null ? sUnderlayContentRef.get() : null;
+        if (target == null) {
+            return;
+        }
+        if (fraction <= 0.01f) {
+            target.setRenderEffect(null);
+            return;
+        }
+        float density = target.getResources().getDisplayMetrics().density;
+        float radius = Math.max(1f, fraction * 28f * density);
+        target.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
+    }
+
+    /** Clears any active blur effect on the underlying browse activity. */
+    public static void clearUnderlayBlur() {
+        setUnderlayBlurFraction(0f);
     }
 
     @Override

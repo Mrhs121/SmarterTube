@@ -32,4 +32,17 @@
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
+
+    <!-- Translucent player window so swiping down to the mini-player reveals Home progressively underneath. -->
+    <style name="Theme.SmarterTube.Mobile.Player" parent="App.Theme.Leanback.Player">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
+
+    <style name="Theme.SmarterTube.Mobile.PlayerTranslucentOverlay">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
 </resources>
