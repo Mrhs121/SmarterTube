@@ -718,13 +718,14 @@ final class ModernPlayerChrome {
                     return;
                 }
                 closeSheet();
-                if (action.getId() == R.id.lb_control_closed_captioning) {
-                    // Subtitle language picker, not the on/off toggle.
-                    PlaybackPresenter.instance(mActivity).onButtonLongClicked(R.id.lb_control_closed_captioning,
-                            isOn(R.id.lb_control_closed_captioning) ? PlayerUI.BUTTON_ON : PlayerUI.BUTTON_OFF);
+                long id = action.getId();
+                if (id == R.id.lb_control_closed_captioning || id == R.id.action_video_speed) {
+                    // Phone sheet taps should open the subtitle / speed picker instead of toggling on/off.
+                    PlaybackPresenter.instance(mActivity).onButtonLongClicked((int) id,
+                            isOn((int) id) ? PlayerUI.BUTTON_ON : PlayerUI.BUTTON_OFF);
                     return;
                 }
-                if (action.getId() == R.id.action_mobile_app_settings) {
+                if (id == R.id.action_mobile_app_settings) {
                     mHost.openAppSettings();
                     return;
                 }
